@@ -108,6 +108,10 @@ hud.on({
     game?.summonFromHouse();
     render();
   },
+  closeSummon: () => {
+    game?.clearSelection();
+    render();
+  },
   build: (mode: SelectionMode) => {
     game?.setBuildMode(mode);
     render();

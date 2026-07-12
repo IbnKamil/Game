@@ -22,6 +22,14 @@ export const UNIT_LABEL: Record<UnitRank, string> = {
   4: 'Танк',
 };
 
+/** Recruitment buildings by rank. */
+export const RECRUIT_LABEL: Record<HouseRank, string> = {
+  1: 'Домик',
+  2: 'Казарма',
+  3: 'Военный штаб',
+  4: 'Военный завод',
+};
+
 /** How many figures are drawn for each rank. */
 export const UNIT_FIGURE_COUNT: Record<UnitRank, number> = {
   1: 5,

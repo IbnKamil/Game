@@ -1,10 +1,12 @@
 import {
   HOUSE_COST,
+  RECRUIT_LABEL,
   STRONG_TOWER_COST,
   TOWER_COST,
   UNIT_COST,
   UNIT_LABEL,
   houseRankFromKind,
+  isHouseBuilding,
 } from './constants';
 import { calcIncome, calcUpkeep, farmCost, netIncome } from './economy';
 import type { Game } from './Game';
@@ -48,6 +50,14 @@ export function mountHud(root: HTMLElement): {
           <button type="button" data-act="menu" class="primary">В меню</button>
         </div>
       </div>
+      <div class="summon-modal" id="summonModal" hidden>
+        <div class="summon-card">
+          <button type="button" class="summon-close" data-act="close-summon" aria-label="Закрыть">×</button>
+          <div class="summon-title" id="summonTitle">Вызов юнитов</div>
+          <div class="summon-body" id="summonBody"></div>
+          <div class="summon-actions" id="summonActions"></div>
+        </div>
+      </div>
   `;
   root.appendChild(shell);
 
@@ -62,6 +72,7 @@ export function mountHud(root: HTMLElement): {
     if (act === 'undo') handlers.undo?.();
     if (act === 'menu') handlers.menu?.();
     if (act === 'summon') handlers.summon?.();
+    if (act === 'close-summon') handlers.closeSummon?.();
     if (act.startsWith('build:')) handlers.build?.(act.slice(6) as SelectionMode);
   });
 
@@ -87,6 +98,8 @@ export function mountHud(root: HTMLElement): {
     } else {
       winModal.hidden = true;
     }
+
+    updateSummonModal(game);
 
     const prov = game.selectedProvince();
     const sel = game.ui.selectedKey ? game.cells[game.ui.selectedKey] : null;
@@ -130,39 +143,24 @@ export function mountHud(root: HTMLElement): {
           `Кр. башня (${STRONG_TOWER_COST})`,
           prov.money >= STRONG_TOWER_COST,
         );
-        html += `</div><h3>Домики призыва</h3><div class="btn-grid">`;
+        html += `</div><h3>Здания призыва</h3><div class="btn-grid">`;
         for (const r of [1, 2, 3, 4] as const) {
           html += btn(
             `build:buildHouse${r}`,
-            `Домик ${'I'.repeat(r)} (${HOUSE_COST[r]})`,
+            `${RECRUIT_LABEL[r]} (${HOUSE_COST[r]})`,
             prov.money >= HOUSE_COST[r],
           );
         }
         html += `</div>`;
-        html += `<p class="hint">Юниты вызываются только из домиков: ранг N → домик N, появление через N ходов рядом с домиком.</p>`;
+        html += `<p class="hint">Клик по домику / казарме / штабу / заводу открывает окно вызова. Юнит появляется через N ходов рядом со зданием.</p>`;
       }
     } else {
       html += `<p class="hint">Выберите свою провинцию на карте.</p>`;
     }
 
-    if (sel && game.ui.mode === 'house' && sel.building) {
-      const rank = houseRankFromKind(sel.building);
-      if (rank) {
-        html += `<h3>Домик ${rank}</h3>`;
-        if (sel.training) {
-          html += `<p>Обучение: ${UNIT_LABEL[sel.training.rank]}, осталось <b>${sel.training.turnsLeft}</b> ход(а).</p>`;
-        } else if (human) {
-          const cost = UNIT_COST[rank];
-          const can = (prov?.money ?? 0) >= cost;
-          html += `<p>Вызов: <b>${UNIT_LABEL[rank]}</b> за ${cost}🪙.<br/>Появятся через ${rank} ход(а) возле домика.</p>`;
-          html += `<button type="button" class="primary wide" data-act="summon" ${can ? '' : 'disabled'}>Вызвать: ${UNIT_LABEL[rank]}</button>`;
-        }
-      }
-    }
-
     if (sel?.unit) {
       const label = UNIT_LABEL[sel.unit.rank];
-      html += `<h3>${label}</h3><p>Ранг ${sel.unit.rank}${sel.unit.moved ? ' (уже ходили)' : ''}. Защита соседних клеток = ранг.</p>`;
+      html += `<h3>${label}</h3><p>Ранг ${sel.unit.rank}${sel.unit.moved ? ' (уже ходили)' : ''}. По своей земле — до 2 клеток. Атака — на соседнюю.</p>`;
     }
 
     html += `
@@ -177,12 +175,70 @@ export function mountHud(root: HTMLElement): {
       <ul class="rules">
         <li>Доход с гексов и ферм; юниты едят монеты.</li>
         <li>Захват: ранг юнита &gt; защиты клетки.</li>
-        <li>Объединение юнитов усиливает ранг (до 4).</li>
-        <li><b>Домики I–IV</b> — единственный способ вызвать юнитов.</li>
+        <li>Объединение юнитов отключено.</li>
+        <li>По своей территории ход до 2 клеток.</li>
+        <li>Вызов только из зданий призыва.</li>
       </ul>
     `;
 
     panel.innerHTML = html;
+  }
+
+  function updateSummonModal(game: Game): void {
+    const modal = shell.querySelector('#summonModal') as HTMLElement;
+    const title = shell.querySelector('#summonTitle')!;
+    const body = shell.querySelector('#summonBody')!;
+    const actions = shell.querySelector('#summonActions')!;
+
+    const key = game.ui.selectedKey;
+    const cell = key ? game.cells[key] : null;
+    const show =
+      !!cell &&
+      game.ui.mode === 'house' &&
+      isHouseBuilding(cell.building) &&
+      cell.owner === game.currentPlayerId &&
+      !game.winnerId;
+
+    if (!show) {
+      modal.hidden = true;
+      return;
+    }
+
+    const rank = houseRankFromKind(cell!.building!)!;
+    const prov = game.getProvince(key!);
+    const human = game.currentPlayer().isHuman;
+    const name = RECRUIT_LABEL[rank];
+    const unitName = UNIT_LABEL[rank];
+    const cost = UNIT_COST[rank];
+
+    modal.hidden = false;
+    title.textContent = name;
+
+    if (cell!.training) {
+      body.innerHTML = `
+        <p class="summon-unit">${UNIT_LABEL[cell!.training.rank]}</p>
+        <p>Идёт обучение. Осталось ходов: <b>${cell!.training.turnsLeft}</b>.</p>
+        <p class="hint">Юнит появится на соседней свободной клетке.</p>
+      `;
+      actions.innerHTML = `<button type="button" data-act="close-summon">Закрыть</button>`;
+    } else {
+      body.innerHTML = `
+        <p class="summon-unit">${unitName}</p>
+        <div class="summon-stats">
+          <div><span>Стоимость</span><b>${cost}🪙</b></div>
+          <div><span>Время</span><b>${rank} ход(а)</b></div>
+          <div><span>Монеты провинции</span><b>${prov?.money ?? 0}🪙</b></div>
+        </div>
+        <p class="hint">После оплаты юнит появится рядом со зданием через ${rank} ваш(их) ход(а).</p>
+      `;
+      const can = human && (prov?.money ?? 0) >= cost;
+      actions.innerHTML = `
+        <button type="button" class="primary" data-act="summon" ${can ? '' : 'disabled'}>
+          Вызвать: ${unitName}
+        </button>
+        <button type="button" data-act="close-summon">Отмена</button>
+      `;
+    }
   }
 
   return {
@@ -208,5 +264,6 @@ interface HudHandlers {
   undo?: () => void;
   menu?: () => void;
   summon?: () => void;
+  closeSummon?: () => void;
   build?: (mode: SelectionMode) => void;
 }

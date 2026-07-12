@@ -557,7 +557,13 @@ export function drawBuildingFigurine(
   else if (kind === 'farm') drawFarm(ctx, x, y);
   else if (kind === 'tower') drawTower(ctx, x, y, false);
   else if (kind === 'strongTower') drawTower(ctx, x, y, true);
-  else if (isHouseBuilding(kind)) drawHouse(ctx, x, y, houseRankFromKind(kind)!, trainLeft);
+  else if (isHouseBuilding(kind)) {
+    const rank = houseRankFromKind(kind)!;
+    if (rank === 1) drawCottage(ctx, x, y, trainLeft);
+    else if (rank === 2) drawBarracksBuilding(ctx, x, y, trainLeft);
+    else if (rank === 3) drawHeadquarters(ctx, x, y, trainLeft);
+    else drawMilitaryFactory(ctx, x, y, trainLeft);
+  }
   ctx.restore();
 }
 
@@ -832,57 +838,54 @@ function drawTower(ctx: CanvasRenderingContext2D, x: number, y: number, strong: 
   ctx.fillText(String(prot), x, y + 2);
 }
 
-function drawHouse(
+function drawTrainBadge(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  rank: number,
   trainLeft: number | null,
 ): void {
-  const colors = ['#94d82d', '#74c0fc', '#ff922b', '#e599f7'];
-  const accent = colors[rank - 1];
-  const w = 13 + rank * 2.2;
-  const stories = rank;
-  const wallH = 6.5 + stories * 3.2;
+  if (trainLeft === null) return;
+  shadow(ctx, x, y + 6, 5, 2, 0.3);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(x, y, 7.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#c92a2a';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#c92a2a';
+  ctx.font = 'bold 10px Outfit, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(trainLeft), x, y + 0.5);
+}
 
+/** Rank 1 — cottage / дом. */
+function drawCottage(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  trainLeft: number | null,
+): void {
+  const accent = '#94d82d';
+  const w = 15;
+  const wallH = 9.5;
   shadow(ctx, x, y + 8, w * 0.55, 3.2, 0.33);
-
-  // Foundation
   isoBox(ctx, x, y + 5, w + 2, w * 0.75, 2.5, '#868e96');
-
-  // Main body
   isoBox(ctx, x, y + 3, w, w * 0.7, wallH, '#f8f1e7');
   drawBrickLines(ctx, x, y + 3, w, wallH, '#e0d6c8');
-
-  // Story separators + windows
-  for (let s = 0; s < stories; s++) {
-    const sy = y + 3 - 4 - s * 3.4;
-    drawLine(ctx, x - w * 0.35, sy, x + w * 0.35, sy + w * 0.08, shade(accent, -20), 0.7);
-    const winCount = Math.min(3, 1 + s);
-    for (let i = 0; i < winCount; i++) {
-      const wx = x - (winCount - 1) * 2.2 + i * 4.4;
-      isoBox(ctx, wx, sy + 1.5, 2.8, 2.2, 2.6, '#1c3a4a');
-      // Lit panes
-      ctx.fillStyle = 'rgba(255,236,153,0.55)';
-      ctx.fillRect(wx - 0.7, sy - 0.2, 0.6, 1.1);
-      ctx.fillRect(wx + 0.15, sy - 0.2, 0.6, 1.1);
-      // Shutters
-      isoBox(ctx, wx - 1.8, sy + 1.2, 1.1, 1.8, 2.4, accent);
-      isoBox(ctx, wx + 1.8, sy + 1.2, 1.1, 1.8, 2.4, accent);
-    }
-  }
-
-  // Door
+  isoBox(ctx, x - 3, y - 1, 2.8, 2.2, 2.6, '#1c3a4a');
+  isoBox(ctx, x + 3, y - 1, 2.8, 2.2, 2.6, '#1c3a4a');
+  ctx.fillStyle = 'rgba(255,236,153,0.55)';
+  ctx.fillRect(x - 3.5, y - 2.5, 1.2, 1.2);
+  ctx.fillRect(x + 2.5, y - 2.5, 1.2, 1.2);
   isoBox(ctx, x, y + 4, 3.6, 2.6, 5, '#5c4033');
   isoBox(ctx, x + 1, y + 2.2, 0.7, 0.7, 0.7, '#c9a227');
-  isoBox(ctx, x, y + 0.5, 4.2, 1.5, 1.2, shade(accent, -10));
-
-  // Roof
   const roofTop = y + 3 - wallH;
   ctx.fillStyle = shade(accent, 18);
   ctx.beginPath();
   ctx.moveTo(x - w / 2 - 2.5, roofTop + 2);
-  ctx.lineTo(x, roofTop - 7 - rank);
+  ctx.lineTo(x, roofTop - 8);
   ctx.lineTo(x + w / 2 + 2.5, roofTop + 2);
   ctx.lineTo(x, roofTop + 5);
   ctx.closePath();
@@ -890,61 +893,179 @@ function drawHouse(
   ctx.fillStyle = shade(accent, -28);
   ctx.beginPath();
   ctx.moveTo(x + w / 2 + 2.5, roofTop + 2);
-  ctx.lineTo(x, roofTop - 7 - rank);
+  ctx.lineTo(x, roofTop - 8);
   ctx.lineTo(x + w / 2 - 1, roofTop + 6);
   ctx.closePath();
   ctx.fill();
-  // Roof tiles
-  ctx.strokeStyle = shade(accent, -40);
-  ctx.globalAlpha = 0.45;
-  ctx.lineWidth = 0.55;
-  for (let i = 1; i <= 3 + rank; i++) {
-    const t = i / (4 + rank);
-    ctx.beginPath();
-    ctx.moveTo(x - (w / 2) * (1 - t), roofTop + 2 - t * (9 + rank));
-    ctx.lineTo(x + (w / 2) * (1 - t), roofTop + 2 - t * (9 + rank));
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-
-  // Chimney + smoke
   isoBox(ctx, x + w * 0.28, roofTop - 2, 3, 2.8, 6, shade(accent, -35));
-  ctx.fillStyle = 'rgba(180,180,180,0.35)';
-  for (let i = 0; i < 3; i++) {
-    ctx.beginPath();
-    ctx.ellipse(x + w * 0.28 + i * 0.8, roofTop - 10 - i * 2.2, 1.6 + i * 0.4, 1 + i * 0.2, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Barracks sign
-  isoBox(ctx, x - w * 0.3, y - 1, 4.5, 1.5, 2.2, '#fff');
-  ctx.fillStyle = '#212529';
-  ctx.font = 'bold 8px Outfit, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(`H${rank}`, x - w * 0.3, y - 2.2);
-
   ctx.fillStyle = '#212529';
   ctx.font = 'bold 8px Outfit, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText(`H${rank}`, x, y + 9);
+  ctx.fillText('H1', x, y + 9);
+  drawTrainBadge(ctx, x + w / 2 + 3, roofTop - 4, trainLeft);
+}
 
-  if (trainLeft !== null) {
-    const bx = x + w / 2 + 3;
-    const by = roofTop - 6;
-    shadow(ctx, bx, by + 6, 5, 2, 0.3);
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(bx, by, 7.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#c92a2a';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = '#c92a2a';
-    ctx.font = 'bold 10px Outfit, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(trainLeft), bx, by + 0.5);
+/** Rank 2 — barracks / казарма. */
+function drawBarracksBuilding(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  trainLeft: number | null,
+): void {
+  shadow(ctx, x, y + 9, 14, 4, 0.34);
+  // Long barrack block
+  isoBox(ctx, x, y + 4, 22, 12, 8, '#5c6b5a');
+  drawBrickLines(ctx, x, y + 4, 22, 8, '#3d4a3c');
+  // Camo roof
+  isoBox(ctx, x, y - 4, 24, 13, 3.5, '#2f4a34');
+  for (let i = 0; i < 5; i++) {
+    isoBox(ctx, x - 8 + i * 4, y - 5.5, 3.2, 2.5, 1.2, i % 2 ? '#3d5a40' : '#2b8a3e');
   }
+  // Door arches
+  for (const dx of [-6, 0, 6]) {
+    isoBox(ctx, x + dx, y + 4, 4, 2.5, 5, '#2b2b2b');
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath();
+    ctx.ellipse(x + dx, y + 5.5, 1.6, 2.2, 0, Math.PI, 0);
+    ctx.fill();
+  }
+  // Windows strip
+  for (let i = 0; i < 6; i++) {
+    isoBox(ctx, x - 9 + i * 3.5, y - 0.5, 2.2, 1.8, 2, '#1c3a4a');
+  }
+  // Flag pole
+  drawLine(ctx, x + 10, y - 7, x + 10, y - 16, '#adb5bd', 1.3);
+  ctx.fillStyle = '#1971c2';
+  ctx.beginPath();
+  ctx.moveTo(x + 10, y - 16);
+  ctx.lineTo(x + 17, y - 13.5);
+  ctx.lineTo(x + 10, y - 11);
+  ctx.closePath();
+  ctx.fill();
+  // Sandbags
+  for (const dx of [-11, -9, 9, 11]) {
+    isoBox(ctx, x + dx, y + 6.5, 2.4, 2, 1.8, '#c2a878');
+  }
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 8px Outfit, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('КАЗ', x, y - 8);
+  drawTrainBadge(ctx, x + 13, y - 12, trainLeft);
+}
+
+/** Rank 3 — military HQ / штаб. */
+function drawHeadquarters(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  trainLeft: number | null,
+): void {
+  shadow(ctx, x, y + 9, 13, 4.2, 0.35);
+  // Base podium
+  isoBox(ctx, x, y + 5, 20, 14, 4, '#495057');
+  // Main HQ body
+  isoBox(ctx, x, y + 1, 16, 12, 12, '#dee2e6');
+  drawBrickLines(ctx, x, y + 1, 16, 12, '#adb5bd');
+  // Glass facade
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      isoBox(ctx, x - 4 + col * 4, y - 2 - row * 3.2, 3, 2.2, 2.4, '#1c7ed6');
+      ctx.fillStyle = 'rgba(116,192,252,0.45)';
+      ctx.fillRect(x - 4.5 + col * 4, y - 3.5 - row * 3.2, 1.5, 1.2);
+    }
+  }
+  // Command tower
+  isoBox(ctx, x + 1, y - 12, 8, 7, 8, '#868e96');
+  isoBox(ctx, x + 1, y - 19, 9, 8, 3, '#343a40');
+  // Antenna / dishes
+  isoCylinder(ctx, x + 1, y - 22, 2.5, 1.4, 2, '#adb5bd');
+  drawLine(ctx, x + 1, y - 23, x + 1, y - 30, '#ced4da', 1.4);
+  ctx.strokeStyle = 'rgba(116,192,252,0.5)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(x + 1, y - 27, 3.5, 0, Math.PI * 2);
+  ctx.stroke();
+  // Entrance canopy
+  isoBox(ctx, x - 4, y + 2, 6, 4, 2, '#212529');
+  isoBox(ctx, x - 4, y + 4, 3.5, 2.5, 4, '#1a1a1a');
+  // Star emblem
+  ctx.fillStyle = '#fab005';
+  ctx.beginPath();
+  const sx = x + 5;
+  const sy = y - 14;
+  for (let i = 0; i < 5; i++) {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+    const r = 2.4;
+    const px = sx + Math.cos(a) * r;
+    const py = sy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#212529';
+  ctx.font = 'bold 8px Outfit, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('ШТАБ', x, y + 9);
+  drawTrainBadge(ctx, x + 12, y - 18, trainLeft);
+}
+
+/** Rank 4 — military factory / завод. */
+function drawMilitaryFactory(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  trainLeft: number | null,
+): void {
+  shadow(ctx, x, y + 9, 15, 4.5, 0.36);
+  // Factory floor
+  isoBox(ctx, x, y + 5, 24, 14, 5, '#495057');
+  // Main hangar
+  isoBox(ctx, x - 2, y + 1, 18, 12, 10, '#868e96');
+  // Hangar roof (sawtooth)
+  for (let i = 0; i < 3; i++) {
+    const hx = x - 7 + i * 5.5;
+    ctx.fillStyle = '#343a40';
+    ctx.beginPath();
+    ctx.moveTo(hx - 3, y - 8);
+    ctx.lineTo(hx, y - 14);
+    ctx.lineTo(hx + 3, y - 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#1c7ed6';
+    ctx.beginPath();
+    ctx.moveTo(hx, y - 14);
+    ctx.lineTo(hx + 3, y - 8);
+    ctx.lineTo(hx + 2.2, y - 8);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Smokestacks
+  isoCylinder(ctx, x + 9, y - 2, 2.2, 1.3, 16, '#495057');
+  isoCylinder(ctx, x + 12.5, y, 1.8, 1.1, 12, '#343a40');
+  ctx.fillStyle = 'rgba(120,120,120,0.4)';
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath();
+    ctx.ellipse(x + 9 + i * 0.6, y - 20 - i * 2.5, 2 + i * 0.5, 1.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Big hangar door
+  isoBox(ctx, x - 3, y + 3, 8, 3, 7, '#212529');
+  for (let i = 0; i < 4; i++) {
+    drawLine(ctx, x - 5.5 + i * 1.8, y - 2, x - 5.5 + i * 1.8, y + 5, '#343a40', 0.8);
+  }
+  // Crane
+  isoBox(ctx, x + 5, y - 6, 2, 2, 10, '#fab005');
+  isoBox(ctx, x + 2, y - 15, 12, 2, 1.5, '#f08c00');
+  drawLine(ctx, x - 2, y - 14, x - 2, y - 6, '#adb5bd', 1);
+  isoBox(ctx, x - 2, y - 6, 2.5, 2.5, 2, '#868e96');
+  // Tank hull on lot
+  isoBox(ctx, x - 8, y + 6, 6, 4, 2.5, '#2f9e44');
+  isoBox(ctx, x - 6, y + 4.5, 3, 2.5, 1.8, '#1a1a1a');
+  ctx.fillStyle = '#ffd43b';
+  ctx.font = 'bold 8px Outfit, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('ЗАВОД', x, y - 9);
+  drawTrainBadge(ctx, x + 14, y - 16, trainLeft);
 }

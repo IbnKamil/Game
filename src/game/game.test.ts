@@ -215,6 +215,33 @@ describe('AI actions', () => {
   });
 });
 
+describe('Movement rules', () => {
+  it('allows 2-hex moves on own land and forbids merging', () => {
+    const g = makeGame(33);
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    const start = prov.hexes[0];
+    const startCell = g.cells[start];
+    startCell.unit = { id: 1, owner: 1, rank: 1, moved: false };
+    startCell.building = startCell.building === 'castle' ? 'castle' : null;
+
+    const targets = g.moveTargets(start);
+    expect(targets.size).toBeGreaterThan(0);
+    for (const t of targets) {
+      const c = g.cells[t];
+      if (c.owner === 1) {
+        expect(c.unit).toBeNull();
+      }
+    }
+
+    const occupied = [...targets][0];
+    if (occupied) {
+      g.cells[occupied].unit = { id: 2, owner: 1, rank: 1, moved: false };
+      const again = g.moveTargets(start);
+      expect(again.has(occupied)).toBe(false);
+    }
+  });
+});
+
 describe('Economy', () => {
   it('farms increase net income', () => {
     const g = makeGame(5);

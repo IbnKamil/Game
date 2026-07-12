@@ -225,11 +225,8 @@ export function canMoveOntoFriendly(
 ): boolean {
   const target = cells[cellKey(targetQ, targetR)];
   if (!target || target.owner !== unit.owner) return false;
-  if (target.tree) return true; // can cut tree
-  if (target.unit) {
-    // merge if combined rank <= 4
-    return unit.rank + target.unit.rank <= 4;
-  }
+  // Merging disabled — destination must be empty of units
+  if (target.unit) return false;
   return true;
 }
 

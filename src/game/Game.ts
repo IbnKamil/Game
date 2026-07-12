@@ -1,6 +1,7 @@
 import {
   HOUSE_COST,
   HOUSE_TRAIN_TURNS,
+  RECRUIT_LABEL,
   STRONG_TOWER_COST,
   TOWER_COST,
   UNIT_COST,
@@ -13,7 +14,6 @@ import {
   adjacentEmptyOwned,
   applyIncomeAndStarve,
   canCapture,
-  canMoveOntoFriendly,
   defenseStrength,
   farmCost,
   netIncome,
@@ -180,17 +180,18 @@ export class Game {
       return;
     }
 
-    // Select house for training
+    // Select recruitment building — opens summon UI
     if (
       cell.owner === this.currentPlayerId &&
       isHouseBuilding(cell.building)
     ) {
       this.ui = { selectedKey: key, mode: 'house', hoverKey: this.ui.hoverKey };
       const rank = houseRankFromKind(cell.building!)!;
+      const name = RECRUIT_LABEL[rank];
       if (cell.training) {
-        this.message = `Домик ${rank}: обучение юнита, осталось ходов: ${cell.training.turnsLeft}.`;
+        this.message = `${name}: обучение, осталось ходов: ${cell.training.turnsLeft}.`;
       } else {
-        this.message = `Домик ${rank}: можно вызвать юнита ранга ${rank}.`;
+        this.message = `${name}: можно вызвать ${UNIT_LABEL[rank]}.`;
       }
       return;
     }
@@ -221,10 +222,10 @@ export class Game {
       buildFarm: 'ферму',
       buildTower: 'башню',
       buildStrongTower: 'крепкую башню',
-      buildHouse1: 'домик I',
-      buildHouse2: 'домик II',
-      buildHouse3: 'домик III',
-      buildHouse4: 'домик IV',
+      buildHouse1: 'домик',
+      buildHouse2: 'казарму',
+      buildHouse3: 'военный штаб',
+      buildHouse4: 'военный завод',
     };
     this.message = `Выберите клетку для постройки: ${labels[mode] ?? ''}.`;
   }
@@ -321,13 +322,13 @@ export class Game {
 
     const rank = houseRankFromKind(cell.building!) as UnitRank;
     if (cell.training) {
-      this.message = 'Этот домик уже обучает юнита.';
+      this.message = `${RECRUIT_LABEL[rank]} уже обучает юнита.`;
       return;
     }
 
     const cost = UNIT_COST[rank];
     if (prov.money < cost) {
-      this.message = `Нужно ${cost}🪙 для вызова юнита ранга ${rank}.`;
+      this.message = `Нужно ${cost}🪙 для вызова: ${UNIT_LABEL[rank]}.`;
       return;
     }
 
@@ -337,7 +338,7 @@ export class Game {
       rank,
       turnsLeft: HOUSE_TRAIN_TURNS[rank],
     };
-    this.message = `Вызов: ${UNIT_LABEL[rank]} — появится через ${HOUSE_TRAIN_TURNS[rank]} ход(а) возле домика.`;
+    this.message = `Вызов из «${RECRUIT_LABEL[rank]}»: ${UNIT_LABEL[rank]} — через ${HOUSE_TRAIN_TURNS[rank]} ход(а).`;
   }
 
   private tryMoveUnit(fromKey: string, toKey: string): void {
@@ -349,24 +350,16 @@ export class Game {
     const unit = from.unit;
     if (unit.owner !== this.currentPlayerId) return;
 
-    // Must be adjacent
-    if (hexDistance(from, to) !== 1) {
-      this.message = 'Юнит ходит только на соседнюю клетку.';
+    const targets = this.moveTargets(fromKey);
+    if (!targets.has(toKey)) {
+      this.message = 'Сюда ходить нельзя.';
       return;
     }
 
-    // Same province move / merge / cut tree
+    // Friendly territory: move up to 2 hexes, no merging
     if (to.owner === unit.owner) {
-      if (to.unit && unit.rank + to.unit.rank > 4) {
-        this.message = 'Нельзя объединить — ранг выше 4.';
-        return;
-      }
-      if (to.building === 'castle' && to.unit) {
-        this.message = 'Клетка занята.';
-        return;
-      }
-      if (!canMoveOntoFriendly(this.cells, unit, to.q, to.r) && !to.tree) {
-        this.message = 'Нельзя сюда ходить.';
+      if (to.unit) {
+        this.message = 'Клетка занята юнитом. Объединение отключено.';
         return;
       }
 
@@ -374,42 +367,22 @@ export class Game {
       if (to.tree) {
         to.tree = false;
         to.palm = false;
-        // cutting tree spends the move; unit stays if target has unit? Classic: unit moves onto tree hex and removes tree
-        if (to.unit) {
-          // merge after cut? rare — treat as merge
-          const newRank = (unit.rank + to.unit.rank) as UnitRank;
-          to.unit = {
-            id: this.nextUnitId++,
-            owner: unit.owner,
-            rank: newRank,
-            moved: true,
-          };
-          from.unit = null;
-        } else {
-          from.unit = null;
-          to.unit = { ...unit, moved: true };
-        }
         this.message = 'Дерево срублено.';
-      } else if (to.unit) {
-        const newRank = (unit.rank + to.unit.rank) as UnitRank;
-        to.unit = {
-          id: this.nextUnitId++,
-          owner: unit.owner,
-          rank: newRank,
-          moved: true,
-        };
-        from.unit = null;
-        this.message = `Юниты объединены → ранг ${newRank}.`;
       } else {
-        from.unit = null;
-        to.unit = { ...unit, moved: true };
         this.message = 'Юнит перемещён.';
       }
+      from.unit = null;
+      to.unit = { ...unit, moved: true };
       this.ui = { selectedKey: toKey, mode: 'none', hoverKey: this.ui.hoverKey };
       return;
     }
 
-    // Capture neutral or enemy
+    // Capture: only adjacent (enforced by moveTargets)
+    if (hexDistance(from, to) !== 1) {
+      this.message = 'Атаковать можно только соседнюю клетку.';
+      return;
+    }
+
     if (!canCapture(this.cells, unit, to.q, to.r)) {
       const def = defenseStrength(this.cells, to.q, to.r, to.owner);
       this.message = `Слишком сильная защита (${def}). Нужен ранг > ${def}.`;
@@ -417,13 +390,8 @@ export class Game {
     }
 
     this.pushUndo();
-    // Destroy enemy unit/building (except we capture hex)
     to.unit = null;
-    if (to.building && to.building !== 'castle') {
-      // farms/towers/houses destroyed on capture
-      to.building = null;
-      to.training = null;
-    } else if (to.building === 'castle') {
+    if (to.building) {
       to.building = null;
       to.training = null;
     }
@@ -466,7 +434,7 @@ export class Game {
         moved: true, // cannot move on spawn turn
       };
       if (this.players.find((p) => p.id === owner)?.isHuman) {
-        this.message = `${UNIT_LABEL[rank]} появились возле домика!`;
+        this.message = `${UNIT_LABEL[rank]} появились возле «${RECRUIT_LABEL[rank]}»!`;
       }
     }
   }
@@ -527,13 +495,33 @@ export class Game {
     const result = new Set<string>();
     if (!from?.unit || from.unit.moved) return result;
     const unit = from.unit;
+
+    // Own territory: BFS up to 2 steps through owned hexes (no unit stacking)
+    const queue: { key: string; dist: number }[] = [{ key: fromKey, dist: 0 }];
+    const seen = new Set<string>([fromKey]);
+    while (queue.length) {
+      const { key, dist } = queue.shift()!;
+      if (dist >= 2) continue;
+      const cell = this.cells[key];
+      for (const n of hexNeighbors(cell.q, cell.r)) {
+        const nk = cellKey(n.q, n.r);
+        if (seen.has(nk)) continue;
+        const to = this.cells[nk];
+        if (!to || to.owner !== unit.owner) continue;
+        // Can pass/land only if no other unit
+        if (to.unit) continue;
+        seen.add(nk);
+        result.add(nk);
+        queue.push({ key: nk, dist: dist + 1 });
+      }
+    }
+
+    // Attacks / neutral capture: adjacent only
     for (const n of hexNeighbors(from.q, from.r)) {
       const nk = cellKey(n.q, n.r);
       const to = this.cells[nk];
       if (!to) continue;
-      if (to.owner === unit.owner) {
-        if (to.tree || !to.unit || unit.rank + to.unit.rank <= 4) result.add(nk);
-      } else if (canCapture(this.cells, unit, to.q, to.r)) {
+      if (to.owner !== unit.owner && canCapture(this.cells, unit, to.q, to.r)) {
         result.add(nk);
       }
     }
