@@ -13,8 +13,10 @@ const hud = mountHud(app);
 
 let game: Game | null = null;
 let renderer: Renderer | null = null;
-let aiTimer: number | null = null;
 let canvas: HTMLCanvasElement | null = null;
+/** Cancels in-flight AI timeouts when incremented. */
+let aiEpoch = 0;
+const aiTimers = new Set<number>();
 
 const menu = mountMenu(app, menuState, (config) => {
   startGame(config);
@@ -49,51 +51,68 @@ function render(): void {
 }
 
 function stopAi(): void {
-  if (aiTimer !== null) {
-    window.clearTimeout(aiTimer);
-    aiTimer = null;
-  }
+  aiEpoch += 1;
+  for (const id of aiTimers) window.clearTimeout(id);
+  aiTimers.clear();
 }
 
-function scheduleAi(): void {
-  stopAi();
+function delay(ms: number, epoch: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const id = window.setTimeout(() => {
+      aiTimers.delete(id);
+      resolve(epoch === aiEpoch);
+    }, ms);
+    aiTimers.add(id);
+  });
+}
+
+async function scheduleAi(): Promise<void> {
+  // Cancel any previous AI loop, then claim this run's epoch
+  for (const id of aiTimers) window.clearTimeout(id);
+  aiTimers.clear();
+  const epoch = ++aiEpoch;
+
   if (!game || game.winnerId) return;
-  if (game.currentPlayer().isHuman) return;
 
-  const diff = game.config.aiDifficulty ?? 'normal';
-  const thinkMs = diff === 'easy' ? 480 : diff === 'expert' ? 180 : 320;
-
-  const playerId = game.currentPlayerId;
-  aiTimer = window.setTimeout(() => {
-    if (!game || game.winnerId) return;
-    if (game.currentPlayerId !== playerId) {
-      scheduleAi();
-      return;
+  while (game && !game.winnerId && epoch === aiEpoch) {
+    const player = game.currentPlayer();
+    if (!player || player.isHuman) return;
+    if (!player.alive) {
+      game.endTurn();
+      render();
+      continue;
     }
+
+    const diff = game.config.aiDifficulty ?? 'normal';
+    const thinkMs = diff === 'easy' ? 280 : diff === 'expert' ? 80 : 160;
+    const playerId = game.currentPlayerId;
+
+    const still = await delay(thinkMs, epoch);
+    if (!still || !game || game.winnerId) return;
+    if (game.currentPlayerId !== playerId) continue;
+
     try {
       runAiTurn(game, playerId);
     } catch (err) {
       console.error('AI turn failed', err);
     }
+    // Canvas only during AI to keep UI responsive
+    if (renderer && game) renderer.draw(game);
+
+    const ok = await delay(40, epoch);
+    if (!ok || !game || game.winnerId) return;
+    if (game.currentPlayerId !== playerId) continue;
+
+    game.endTurn();
     render();
-    window.setTimeout(() => {
-      if (!game || game.winnerId) return;
-      if (game.currentPlayerId !== playerId) {
-        scheduleAi();
-        return;
-      }
-      game.endTurn();
-      render();
-      scheduleAi();
-    }, 160);
-  }, thinkMs);
+  }
 }
 
 function endTurnFlow(): void {
   if (!game || !game.currentPlayer().isHuman || game.winnerId) return;
   game.endTurn();
   render();
-  scheduleAi();
+  void scheduleAi();
 }
 
 hud.on({
@@ -129,7 +148,6 @@ function bindCanvas(c: HTMLCanvasElement): void {
   canvasBound = true;
 
   c.addEventListener('auxclick', (e) => {
-    // Prevent middle-click opening scroll/autoscroll quirks
     if (e.button === 1) e.preventDefault();
   });
 
@@ -209,7 +227,6 @@ function bindCanvas(c: HTMLCanvasElement): void {
     { passive: false },
   );
 
-  // Avoid browser autoscroll icon on middle-click
   c.addEventListener('mousedown', (e) => {
     if (e.button === 1) e.preventDefault();
   });

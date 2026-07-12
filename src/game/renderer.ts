@@ -3,9 +3,11 @@ import { hexCorners, hexToPixel, pixelToHex } from './hex';
 import { drawBuildingFigurine, drawUnitFigurine } from './sprites';
 import { cellKey, type UnitRank } from './types';
 
-export const HEX_SIZE = 32;
-const MIN_SCALE = 0.4;
+export const HEX_SIZE = 48; // was 32; figurines stay at previous world pixel size
+const MIN_SCALE = 0.35;
 const MAX_SCALE = 3.2;
+/** Prefer ~1.5× larger hexes on screen vs full-fit (pan/zoom to explore). */
+const FIT_ZOOM_BOOST = 1.5;
 
 export class Renderer {
   canvas: HTMLCanvasElement;
@@ -59,7 +61,8 @@ export class Renderer {
     this.mapCenterX = (minX + maxX) / 2;
     this.mapCenterY = (minY + maxY) / 2;
     this.fitScale = Math.min(w / mapW, h / mapH) * 0.94;
-    this.scale = Math.min(1.35, Math.max(0.55, this.fitScale));
+    // Boost zoom so hexes read ~1.5× larger; figurines keep prior world size
+    this.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.fitScale * FIT_ZOOM_BOOST));
     this.offsetX = w / 2 - this.mapCenterX * this.scale;
     this.offsetY = h / 2 - this.mapCenterY * this.scale;
   }

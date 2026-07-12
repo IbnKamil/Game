@@ -85,8 +85,10 @@ export class Game {
   }
 
   pushUndo(): void {
+    // Skip during AI turns — structuredClone of the full map freezes the UI
+    if (!this.currentPlayer()?.isHuman) return;
     this.undoStack.push(this.snapshot());
-    if (this.undoStack.length > 40) this.undoStack.shift();
+    if (this.undoStack.length > 20) this.undoStack.shift();
   }
 
   undo(): boolean {
@@ -138,10 +140,14 @@ export class Game {
     for (const p of this.players) {
       p.alive = aliveOwners.has(p.id);
     }
-    if (aliveOwners.size === 1) {
-      this.winnerId = [...aliveOwners][0];
+    if (aliveOwners.size <= 1) {
+      this.winnerId =
+        aliveOwners.size === 1 ? [...aliveOwners][0]! : this.currentPlayerId;
       const winner = this.players.find((p) => p.id === this.winnerId);
-      this.message = `${winner?.name ?? 'Игрок'} побеждает!`;
+      this.message =
+        aliveOwners.size === 1
+          ? `${winner?.name ?? 'Игрок'} побеждает!`
+          : 'Игра окончена.';
     }
   }
 
@@ -444,18 +450,25 @@ export class Game {
     this.pushUndo();
     this.clearSelection();
 
-    // Advance to next alive player
     const order = this.players.map((p) => p.id);
     let idx = order.indexOf(this.currentPlayerId);
     let safety = 0;
     do {
       idx = (idx + 1) % order.length;
       safety++;
-    } while (!this.players.find((p) => p.id === order[idx])?.alive && safety < 20);
+    } while (!this.players.find((p) => p.id === order[idx])?.alive && safety < order.length + 2);
 
-    const aliveIds = this.players.filter((p) => p.alive).map((p) => p.id).sort((a, b) => a - b);
+    const aliveIds = this.players
+      .filter((p) => p.alive)
+      .map((p) => p.id)
+      .sort((a, b) => a - b);
     const prevId = this.currentPlayerId;
     this.currentPlayerId = order[idx];
+
+    if (!this.currentPlayer()?.alive || aliveIds.length === 0) {
+      this.checkWinner();
+      return;
+    }
 
     if (this.currentPlayerId === aliveIds[0] && prevId !== this.currentPlayerId) {
       this.turn += 1;
