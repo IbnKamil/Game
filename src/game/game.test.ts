@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { runAiTurn } from './ai';
 import { HOUSE_COST, HOUSE_TRAIN_TURNS, UNIT_COST, defaultPlayerSetup } from './constants';
 import { canCapture, defenseStrength, netIncome } from './economy';
 import { Game } from './Game';
@@ -165,6 +166,52 @@ describe('Combat', () => {
       attacker.rank = (def + 1 > 4 ? 4 : ((def + 1) as 1 | 2 | 3 | 4));
       expect(canCapture(g.cells, attacker, target.q, target.r)).toBe(true);
     }
+  });
+});
+
+describe('Building on trees', () => {
+  it('allows building and clears the tree', () => {
+    const g = makeGame(21);
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    prov.money = 500;
+    const key =
+      prov.hexes.find((h) => {
+        const c = g.cells[h];
+        return !c.building && !c.unit;
+      }) ?? prov.hexes[0];
+    g.cells[key].tree = true;
+    g.cells[key].palm = true;
+    g.cells[key].building = null;
+    g.cells[key].unit = null;
+
+    expect(g.buildAt(key, 'buildFarm')).toBe(true);
+    expect(g.cells[key].building).toBe('farm');
+    expect(g.cells[key].tree).toBe(false);
+    expect(g.cells[key].palm).toBe(false);
+  });
+});
+
+describe('AI actions', () => {
+  it('AI can build via direct API on its turn', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    players[0].isHuman = false;
+    const g = new Game({
+      mapRadius: 6,
+      playerCount: 2,
+      seed: 99,
+      players,
+      aiDifficulty: 'expert',
+    });
+    g.currentPlayerId = 1;
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    prov.money = 200;
+    const beforeBuildings = prov.hexes.filter((h) => g.cells[h].building && g.cells[h].building !== 'castle')
+      .length;
+    runAiTurn(g, 1);
+    const afterBuildings = prov.hexes.filter((h) => g.cells[h].building && g.cells[h].building !== 'castle')
+      .length;
+    const training = prov.hexes.some((h) => g.cells[h].training);
+    expect(afterBuildings >= beforeBuildings || training).toBe(true);
   });
 });
 

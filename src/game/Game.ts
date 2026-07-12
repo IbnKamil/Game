@@ -229,6 +229,31 @@ export class Game {
     this.message = `Выберите клетку для постройки: ${labels[mode] ?? ''}.`;
   }
 
+  /** Direct build for AI / scripts (bypasses human UI gates). */
+  buildAt(key: string, mode: SelectionMode): boolean {
+    if (this.winnerId) return false;
+    const before = this.cells[key]?.building ?? null;
+    this.tryBuild(key, mode);
+    return (this.cells[key]?.building ?? null) !== before && this.cells[key]?.building !== null;
+  }
+
+  /** Direct unit move for AI. */
+  moveUnitTo(fromKey: string, toKey: string): void {
+    if (this.winnerId) return;
+    this.tryMoveUnit(fromKey, toKey);
+  }
+
+  /** Direct summon for AI. */
+  summonAt(houseKey: string): boolean {
+    if (this.winnerId) return false;
+    const cell = this.cells[houseKey];
+    if (!cell || !isHouseBuilding(cell.building) || cell.training) return false;
+    this.ui = { selectedKey: houseKey, mode: 'house', hoverKey: null };
+    const had = cell.training;
+    this.summonFromHouse();
+    return cell.training !== had && cell.training !== null;
+  }
+
   private tryBuild(key: string, mode: SelectionMode): void {
     const cell = this.cells[key];
     const prov = this.getProvince(key);
@@ -236,7 +261,7 @@ export class Game {
       this.message = 'Строить можно только в своей провинции.';
       return;
     }
-    if (cell.unit || cell.tree || cell.building) {
+    if (cell.unit || cell.building) {
       this.message = 'Клетка занята.';
       return;
     }
@@ -277,6 +302,9 @@ export class Game {
 
     this.pushUndo();
     prov.money -= cost;
+    // Building on a tree clears the forest
+    cell.tree = false;
+    cell.palm = false;
     cell.building = building;
     this.ui.mode = 'none';
     this.ui.selectedKey = key;
@@ -518,7 +546,8 @@ export class Game {
     if (!prov || prov.owner !== this.currentPlayerId) return result;
     for (const key of prov.hexes) {
       const c = this.cells[key];
-      if (!c.unit && !c.tree && !c.building) result.add(key);
+      // Trees are allowed — building clears them
+      if (!c.unit && !c.building) result.add(key);
     }
     void mode;
     return result;

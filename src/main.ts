@@ -61,18 +61,31 @@ function scheduleAi(): void {
   if (game.currentPlayer().isHuman) return;
 
   const diff = game.config.aiDifficulty ?? 'normal';
-  const thinkMs = diff === 'easy' ? 520 : diff === 'expert' ? 220 : 380;
+  const thinkMs = diff === 'easy' ? 480 : diff === 'expert' ? 180 : 320;
 
+  const playerId = game.currentPlayerId;
   aiTimer = window.setTimeout(() => {
-    if (!game) return;
-    runAiTurn(game, game.currentPlayerId);
+    if (!game || game.winnerId) return;
+    if (game.currentPlayerId !== playerId) {
+      scheduleAi();
+      return;
+    }
+    try {
+      runAiTurn(game, playerId);
+    } catch (err) {
+      console.error('AI turn failed', err);
+    }
     render();
     window.setTimeout(() => {
       if (!game || game.winnerId) return;
+      if (game.currentPlayerId !== playerId) {
+        scheduleAi();
+        return;
+      }
       game.endTurn();
       render();
       scheduleAi();
-    }, 220);
+    }, 160);
   }, thinkMs);
 }
 
@@ -102,12 +115,58 @@ hud.on({
 });
 
 let canvasBound = false;
+let panning = false;
+let panLastX = 0;
+let panLastY = 0;
+let panMoved = false;
+
 function bindCanvas(c: HTMLCanvasElement): void {
   if (canvasBound) return;
   canvasBound = true;
 
+  c.addEventListener('auxclick', (e) => {
+    // Prevent middle-click opening scroll/autoscroll quirks
+    if (e.button === 1) e.preventDefault();
+  });
+
+  c.addEventListener('mousedown', (e) => {
+    if (!game || !renderer || hud.shell.hidden) return;
+    if (e.button === 1) {
+      e.preventDefault();
+      panning = true;
+      panMoved = false;
+      panLastX = e.clientX;
+      panLastY = e.clientY;
+      c.style.cursor = 'grabbing';
+    }
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!panning || !renderer || !game) return;
+    const dx = e.clientX - panLastX;
+    const dy = e.clientY - panLastY;
+    if (dx !== 0 || dy !== 0) {
+      panMoved = true;
+      renderer.panBy(dx, dy);
+      panLastX = e.clientX;
+      panLastY = e.clientY;
+      renderer.draw(game);
+    }
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (e.button === 1 && panning) {
+      panning = false;
+      if (canvas) canvas.style.cursor = 'crosshair';
+    }
+  });
+
   c.addEventListener('click', (e) => {
     if (!game || !renderer || !game.currentPlayer().isHuman || game.winnerId) return;
+    if (panMoved) {
+      panMoved = false;
+      return;
+    }
     const rect = c.getBoundingClientRect();
     const { q, r } = renderer.screenToHex(e.clientX - rect.left, e.clientY - rect.top);
     const key = cellKey(q, r);
@@ -120,7 +179,7 @@ function bindCanvas(c: HTMLCanvasElement): void {
   });
 
   c.addEventListener('mousemove', (e) => {
-    if (!game || !renderer) return;
+    if (!game || !renderer || panning) return;
     const rect = c.getBoundingClientRect();
     const { q, r } = renderer.screenToHex(e.clientX - rect.left, e.clientY - rect.top);
     const key = cellKey(q, r);
@@ -145,6 +204,11 @@ function bindCanvas(c: HTMLCanvasElement): void {
     },
     { passive: false },
   );
+
+  // Avoid browser autoscroll icon on middle-click
+  c.addEventListener('mousedown', (e) => {
+    if (e.button === 1) e.preventDefault();
+  });
 }
 
 window.addEventListener('resize', () => {

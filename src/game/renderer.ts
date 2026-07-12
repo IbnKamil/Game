@@ -74,6 +74,12 @@ export class Renderer {
     this.offsetY = sy - worldY * this.scale;
   }
 
+  /** Pan map by screen-pixel delta. */
+  panBy(dx: number, dy: number): void {
+    this.offsetX += dx;
+    this.offsetY += dy;
+  }
+
   screenToHex(sx: number, sy: number): { q: number; r: number } {
     const x = (sx - this.offsetX) / this.scale;
     const y = (sy - this.offsetY) / this.scale;

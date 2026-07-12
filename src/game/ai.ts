@@ -9,7 +9,14 @@ import {
 import { farmCost, netIncome, provincesOfPlayer } from './economy';
 import type { Game } from './Game';
 import { hexNeighbors } from './hex';
-import { cellKey, type AiDifficulty, type HouseRank, type PlayerId, type UnitRank } from './types';
+import {
+  cellKey,
+  type AiDifficulty,
+  type HouseRank,
+  type PlayerId,
+  type SelectionMode,
+  type UnitRank,
+} from './types';
 
 interface AiProfile {
   mistakeChance: number;
@@ -55,10 +62,13 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
   },
 };
 
-/** Heuristic AI scaled by difficulty. */
+/** Heuristic AI scaled by difficulty. Uses direct Game APIs (not human UI gates). */
 export function runAiTurn(game: Game, playerId: PlayerId): void {
+  if (game.winnerId || game.currentPlayerId !== playerId) return;
+  if (game.currentPlayer().isHuman) return;
+
   const difficulty = game.config.aiDifficulty ?? 'normal';
-  const profile = PROFILES[difficulty];
+  const profile = PROFILES[difficulty] ?? PROFILES.normal;
   const provinces = provincesOfPlayer(game.provinces, playerId);
   if (provinces.length === 0) return;
 
@@ -70,24 +80,26 @@ export function runAiTurn(game: Game, playerId: PlayerId): void {
     }
   }
 
-  const fresh = provincesOfPlayer(game.provinces, playerId);
-  for (const prov of fresh) {
+  for (const prov of provincesOfPlayer(game.provinces, playerId)) {
     maybeSummon(game, prov.id, profile, difficulty);
   }
 
   const unitKeys: string[] = [];
   for (const prov of provincesOfPlayer(game.provinces, playerId)) {
     for (const key of prov.hexes) {
-      if (game.cells[key].unit && !game.cells[key].unit!.moved) unitKeys.push(key);
+      const u = game.cells[key].unit;
+      if (u && u.owner === playerId && !u.moved) unitKeys.push(key);
     }
   }
 
-  // Expert/hard: move highest rank first
   if (difficulty === 'hard' || difficulty === 'expert') {
     unitKeys.sort((a, b) => (game.cells[b].unit?.rank ?? 0) - (game.cells[a].unit?.rank ?? 0));
   }
 
   for (const fromKey of unitKeys) {
+    // Re-check — unit may have merged/moved
+    const unit = game.cells[fromKey]?.unit;
+    if (!unit || unit.moved || unit.owner !== playerId) continue;
     if (Math.random() < profile.skipMoveChance) continue;
 
     const targets = [...game.moveTargets(fromKey)];
@@ -105,8 +117,7 @@ export function runAiTurn(game: Game, playerId: PlayerId): void {
 
     const bestScore = scoreMove(game, playerId, chosen, profile);
     if (bestScore > 0 || Math.random() < profile.aggression) {
-      game.ui = { selectedKey: fromKey, mode: 'unit', hoverKey: null };
-      game.selectHex(chosen);
+      game.moveUnitTo(fromKey, chosen);
     }
   }
 
@@ -131,7 +142,7 @@ function scoreMove(
   }
   if (cell.owner === 0) return 12 + profile.aggression * 6;
   if (cell.tree) return 7 * profile.preferEconomy;
-  if (cell.unit) return 4; // merge
+  if (cell.unit) return 4;
   return 1;
 }
 
@@ -142,10 +153,9 @@ function maybeSummon(
   difficulty: AiDifficulty,
 ): void {
   const prov = game.provinces.find((p) => p.id === provinceId);
-  if (!prov) return;
+  if (!prov || prov.owner !== game.currentPlayerId) return;
 
   const houseKeys = prov.hexes.filter((h) => isHouseBuilding(game.cells[h].building));
-  // Prefer higher houses on harder difficulties
   const ordered =
     difficulty === 'easy'
       ? houseKeys
@@ -170,8 +180,7 @@ function maybeSummon(
       live.money > 35 + profile.reserveMoney;
 
     if (want && Math.random() > profile.mistakeChance * 0.5) {
-      game.ui = { selectedKey: key, mode: 'house', hoverKey: null };
-      game.summonFromHouse();
+      game.summonAt(key);
     }
   }
 }
@@ -189,11 +198,12 @@ function isThreatened(game: Game, hexes: string[], owner: PlayerId): boolean {
 
 function maybeBuild(game: Game, provinceId: number, profile: AiProfile): void {
   const prov = game.provinces.find((p) => p.id === provinceId);
-  if (!prov) return;
+  if (!prov || prov.owner !== game.currentPlayerId) return;
 
+  // Can build on trees (they get cleared)
   const empty = prov.hexes.filter((h) => {
     const c = game.cells[h];
-    return !c.unit && !c.tree && !c.building;
+    return !c.unit && !c.building;
   });
   if (empty.length === 0) return;
 
@@ -202,7 +212,6 @@ function maybeBuild(game: Game, provinceId: number, profile: AiProfile): void {
   const net = netIncome(game.cells, prov);
   const threatened = isThreatened(game, prov.hexes, prov.owner);
 
-  // Prefer border hex for towers, inner for farms on harder AI
   let pick = empty[Math.floor(Math.random() * empty.length)];
   if (profile.aggression > 0.7) {
     const border = empty.filter((h) => {
@@ -213,12 +222,12 @@ function maybeBuild(game: Game, provinceId: number, profile: AiProfile): void {
       });
     });
     const inner = empty.filter((h) => !border.includes(h));
-    if (threatened && border.length) pick = border[0];
+    if (threatened && border.length) pick = border[Math.floor(Math.random() * border.length)];
     else if (inner.length) pick = inner[Math.floor(Math.random() * inner.length)];
   }
 
   if (houses.length === 0 && prov.money >= HOUSE_COST[1] + profile.reserveMoney * 0.3) {
-    place(game, prov.id, pick, 'buildHouse1');
+    place(game, pick, 'buildHouse1');
     return;
   }
 
@@ -226,18 +235,18 @@ function maybeBuild(game: Game, provinceId: number, profile: AiProfile): void {
     const has = houses.some((h) => houseRankFromKind(game.cells[h].building!) === rank);
     const needFarms = profile.preferEconomy > 0.8 ? rank - 1 : rank;
     if (!has && prov.money >= HOUSE_COST[rank] + profile.reserveMoney && farms >= needFarms) {
-      place(game, prov.id, pick, `buildHouse${rank}` as const);
+      place(game, pick, `buildHouse${rank}` as SelectionMode);
       return;
     }
   }
 
   if (threatened && prov.money >= TOWER_COST + profile.reserveMoney * 0.2) {
     if (Math.random() < 0.35 + profile.aggression * 0.4) {
-      const mode =
+      const mode: SelectionMode =
         prov.money >= STRONG_TOWER_COST + profile.reserveMoney && profile.aggression > 0.7
           ? 'buildStrongTower'
           : 'buildTower';
-      place(game, prov.id, pick, mode);
+      place(game, pick, mode);
       return;
     }
   }
@@ -245,32 +254,19 @@ function maybeBuild(game: Game, provinceId: number, profile: AiProfile): void {
   if (net < 8 * profile.preferEconomy || farms < prov.hexes.length / 3) {
     const cost = farmCost(game.cells, prov);
     if (prov.money >= cost + profile.reserveMoney * 0.2) {
-      place(game, prov.id, pick, 'buildFarm');
+      place(game, pick, 'buildFarm');
       return;
     }
   }
 
-  if (prov.money >= HOUSE_COST[1] + 20 + profile.reserveMoney && houses.length < 2 + Math.floor(profile.aggression)) {
-    place(game, prov.id, pick, 'buildHouse1');
+  if (
+    prov.money >= HOUSE_COST[1] + 20 + profile.reserveMoney &&
+    houses.length < 2 + Math.floor(profile.aggression)
+  ) {
+    place(game, pick, 'buildHouse1');
   }
 }
 
-function place(
-  game: Game,
-  provinceId: number,
-  hexKey: string,
-  mode:
-    | 'buildFarm'
-    | 'buildTower'
-    | 'buildStrongTower'
-    | 'buildHouse1'
-    | 'buildHouse2'
-    | 'buildHouse3'
-    | 'buildHouse4',
-): void {
-  const prov = game.provinces.find((p) => p.id === provinceId);
-  if (!prov) return;
-  game.ui = { selectedKey: prov.hexes[0], mode: 'none', hoverKey: null };
-  game.setBuildMode(mode);
-  game.selectHex(hexKey);
+function place(game: Game, hexKey: string, mode: SelectionMode): void {
+  game.buildAt(hexKey, mode);
 }
