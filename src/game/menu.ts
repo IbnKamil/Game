@@ -1,18 +1,21 @@
 import {
+  AI_DIFFICULTY_PRESETS,
   DEFAULT_NATION_NAMES,
   MAP_SIZE_PRESETS,
   PLAYER_COLORS,
   defaultPlayerSetup,
   mapRadiusFromSize,
+  type AiDifficultyId,
   type MapSizeId,
 } from './constants';
 import { drawUnitFigurine } from './sprites';
-import type { GameConfig, PlayerSetup } from './types';
+import type { AiDifficulty, GameConfig, PlayerSetup } from './types';
 
 export interface MenuState {
   playerCount: number;
   humanCount: number;
   mapSize: MapSizeId;
+  aiDifficulty: AiDifficultyId;
   players: PlayerSetup[];
 }
 
@@ -23,6 +26,7 @@ export function defaultMenuState(): MenuState {
     playerCount,
     humanCount,
     mapSize: 'medium',
+    aiDifficulty: 'normal',
     players: Array.from({ length: playerCount }, (_, i) =>
       defaultPlayerSetup(i, i < humanCount),
     ),
@@ -42,7 +46,6 @@ export function syncPlayers(state: MenuState): void {
       next.push(defaultPlayerSetup(i, i < state.humanCount));
     }
   }
-  // Ensure human flags match humanCount
   for (let i = 0; i < next.length; i++) {
     next[i].isHuman = i < state.humanCount;
   }
@@ -56,6 +59,7 @@ export function menuToConfig(state: MenuState): GameConfig {
     playerCount: state.playerCount,
     seed: (Math.random() * 1e9) | 0,
     players: state.players.map((p) => ({ ...p })),
+    aiDifficulty: state.aiDifficulty as AiDifficulty,
   };
 }
 
@@ -74,6 +78,8 @@ export function mountMenu(
 
   function render(): void {
     syncPlayers(state);
+    const diffHint =
+      AI_DIFFICULTY_PRESETS.find((d) => d.id === state.aiDifficulty)?.hint ?? '';
     el.innerHTML = `
       <div class="menu-card">
         <div class="menu-hero">
@@ -103,6 +109,18 @@ export function mountMenu(
               ).join('')}
             </div>
           </label>
+          <label class="field field-wide">
+            <span>Сложность ИИ</span>
+            <div class="seg">
+              ${AI_DIFFICULTY_PRESETS.map(
+                (d) => `
+                <button type="button" class="seg-btn ${state.aiDifficulty === d.id ? 'active' : ''}" data-diff="${d.id}">
+                  ${d.label}
+                </button>`,
+              ).join('')}
+            </div>
+            <em class="field-hint">${diffHint}</em>
+          </label>
         </div>
 
         <h3 class="menu-section">Государства</h3>
@@ -121,10 +139,10 @@ export function mountMenu(
         </div>
 
         <div class="menu-legend">
-          <div class="legend-item"><canvas data-preview="unit1" width="72" height="40"></canvas><span>1 — 5 ополченцев</span></div>
-          <div class="legend-item"><canvas data-preview="unit2" width="72" height="40"></canvas><span>2 — 3 солдата</span></div>
-          <div class="legend-item"><canvas data-preview="unit3" width="72" height="40"></canvas><span>3 — 3 спецназовца</span></div>
-          <div class="legend-item"><canvas data-preview="unit4" width="72" height="40"></canvas><span>4 — танк</span></div>
+          <div class="legend-item"><canvas data-preview="unit1" width="88" height="48"></canvas><span>1 — 5 ополченцев</span></div>
+          <div class="legend-item"><canvas data-preview="unit2" width="88" height="48"></canvas><span>2 — 3 солдата</span></div>
+          <div class="legend-item"><canvas data-preview="unit3" width="88" height="48"></canvas><span>3 — 3 спецназовца</span></div>
+          <div class="legend-item"><canvas data-preview="unit4" width="88" height="48"></canvas><span>4 — танк</span></div>
         </div>
 
         <button type="button" class="primary menu-start" data-act="start">Начать игру</button>
@@ -153,6 +171,13 @@ export function mountMenu(
       });
     });
 
+    el.querySelectorAll<HTMLButtonElement>('[data-diff]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.aiDifficulty = btn.dataset.diff as AiDifficultyId;
+        render();
+      });
+    });
+
     el.querySelectorAll<HTMLInputElement>('[data-name]').forEach((input) => {
       input.addEventListener('change', () => {
         const i = Number(input.dataset.name);
@@ -174,7 +199,6 @@ export function mountMenu(
     });
 
     el.querySelector('[data-act="start"]')?.addEventListener('click', () => {
-      // Persist text values before start
       el.querySelectorAll<HTMLInputElement>('[data-name]').forEach((input) => {
         const i = Number(input.dataset.name);
         state.players[i].name = input.value.trim() || DEFAULT_NATION_NAMES[i];
@@ -221,6 +245,6 @@ function paintPreviews(root: HTMLElement): void {
     if (!canvas) continue;
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawUnitFigurine(ctx, canvas.width / 2, canvas.height / 2 + 4, rank, false, color);
+    drawUnitFigurine(ctx, canvas.width / 2, canvas.height / 2 + 6, rank, false, color);
   }
 }

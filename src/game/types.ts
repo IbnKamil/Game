@@ -85,7 +85,10 @@ export interface GameConfig {
   humanPlayerId?: PlayerId;
   seed: number;
   players: PlayerSetup[];
+  aiDifficulty: AiDifficulty;
 }
+
+export type AiDifficulty = 'easy' | 'normal' | 'hard' | 'expert';
 
 export interface GameSnapshot {
   cells: Record<string, HexCell>;

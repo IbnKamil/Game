@@ -106,6 +106,15 @@ export const MAP_SIZE_PRESETS = [
 
 export type MapSizeId = (typeof MAP_SIZE_PRESETS)[number]['id'];
 
+export const AI_DIFFICULTY_PRESETS = [
+  { id: 'easy', label: 'Лёгкий', hint: 'Ошибки, медленное развитие' },
+  { id: 'normal', label: 'Обычный', hint: 'Сбалансированный ИИ' },
+  { id: 'hard', label: 'Сложный', hint: 'Агрессия и экономика' },
+  { id: 'expert', label: 'Эксперт', hint: 'Максимальное давление' },
+] as const;
+
+export type AiDifficultyId = (typeof AI_DIFFICULTY_PRESETS)[number]['id'];
+
 export const STARTING_MONEY = 10;
 export const INCOME_PER_HEX = 1;
 

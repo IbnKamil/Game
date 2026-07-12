@@ -12,6 +12,7 @@ function makeGame(seed = 42): Game {
     playerCount: 3,
     seed,
     players,
+    aiDifficulty: 'normal',
   };
   return new Game(config);
 }
@@ -38,12 +39,14 @@ describe('Start menu config', () => {
     state.playerCount = 5;
     state.humanCount = 2;
     state.mapSize = 'large';
+    state.aiDifficulty = 'hard';
     syncPlayers(state);
     state.players[0].name = 'Тестовая Республика';
     state.players[0].color = '#112233';
     const config = menuToConfig(state);
     expect(config.playerCount).toBe(5);
     expect(config.mapRadius).toBe(12);
+    expect(config.aiDifficulty).toBe('hard');
     expect(config.players.filter((p) => p.isHuman)).toHaveLength(2);
     expect(config.players[0].name).toBe('Тестовая Республика');
 
@@ -53,6 +56,7 @@ describe('Start menu config', () => {
     expect(g.players[0].color).toBe('#112233');
     expect(g.players[1].isHuman).toBe(true);
     expect(g.players[2].isHuman).toBe(false);
+    expect(g.config.aiDifficulty).toBe('hard');
   });
 });
 

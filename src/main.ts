@@ -60,6 +60,9 @@ function scheduleAi(): void {
   if (!game || game.winnerId) return;
   if (game.currentPlayer().isHuman) return;
 
+  const diff = game.config.aiDifficulty ?? 'normal';
+  const thinkMs = diff === 'easy' ? 520 : diff === 'expert' ? 220 : 380;
+
   aiTimer = window.setTimeout(() => {
     if (!game) return;
     runAiTurn(game, game.currentPlayerId);
@@ -69,8 +72,8 @@ function scheduleAi(): void {
       game.endTurn();
       render();
       scheduleAi();
-    }, 280);
-  }, 420);
+    }, 220);
+  }, thinkMs);
 }
 
 function endTurnFlow(): void {
@@ -127,6 +130,21 @@ function bindCanvas(c: HTMLCanvasElement): void {
       renderer.draw(game);
     }
   });
+
+  c.addEventListener(
+    'wheel',
+    (e) => {
+      if (!game || !renderer || hud.shell.hidden) return;
+      e.preventDefault();
+      const rect = c.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      renderer.zoomAt(sx, sy, factor);
+      render();
+    },
+    { passive: false },
+  );
 }
 
 window.addEventListener('resize', () => {
@@ -151,7 +169,14 @@ window.addEventListener('keydown', (e) => {
     game.clearSelection();
     render();
   }
+  if (e.key === '+' || e.key === '=') {
+    renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1.12);
+    render();
+  }
+  if (e.key === '-' || e.key === '_') {
+    renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1 / 1.12);
+    render();
+  }
 });
 
-// Start on menu
 menu.show();
