@@ -1,4 +1,4 @@
-import type { BuildingKind, HouseRank, UnitRank } from './types';
+import type { BuildingKind, HouseRank, PlayerId, UnitRank } from './types';
 
 /** Classic Antiyoy-style economy numbers. */
 export const UNIT_COST: Record<UnitRank, number> = {
@@ -13,6 +13,21 @@ export const UNIT_UPKEEP: Record<UnitRank, number> = {
   2: 6,
   3: 18,
   4: 54,
+};
+
+export const UNIT_LABEL: Record<UnitRank, string> = {
+  1: 'Ополченцы',
+  2: 'Солдаты',
+  3: 'Спецназ',
+  4: 'Танк',
+};
+
+/** How many figures are drawn for each rank. */
+export const UNIT_FIGURE_COUNT: Record<UnitRank, number> = {
+  1: 5,
+  2: 3,
+  3: 3,
+  4: 1,
 };
 
 export const FARM_BASE_COST = 12;
@@ -71,11 +86,31 @@ export const PLAYER_COLORS = [
   '#5c7cfa',
 ];
 
+export const DEFAULT_NATION_NAMES = [
+  'Северная Республика',
+  'Восточный Союз',
+  'Южная Федерация',
+  'Западное Княжество',
+  'Центральный Альянс',
+  'Приморская Держава',
+  'Горный Кантон',
+  'Степная Империя',
+];
+
+export const MAP_SIZE_PRESETS = [
+  { id: 'small', label: 'Маленькая', radius: 6 },
+  { id: 'medium', label: 'Средняя', radius: 9 },
+  { id: 'large', label: 'Большая', radius: 12 },
+  { id: 'huge', label: 'Огромная', radius: 15 },
+] as const;
+
+export type MapSizeId = (typeof MAP_SIZE_PRESETS)[number]['id'];
+
 export const STARTING_MONEY = 10;
 export const INCOME_PER_HEX = 1;
 
 export function houseKind(rank: HouseRank): BuildingKind {
-  return (`house${rank}` as BuildingKind);
+  return `house${rank}` as BuildingKind;
 }
 
 export function houseRankFromKind(kind: BuildingKind): HouseRank | null {
@@ -89,3 +124,21 @@ export function houseRankFromKind(kind: BuildingKind): HouseRank | null {
 export function isHouseBuilding(kind: BuildingKind | null): kind is BuildingKind {
   return kind !== null && houseRankFromKind(kind) !== null;
 }
+
+export function defaultPlayerSetup(index: number, isHuman: boolean): {
+  name: string;
+  color: string;
+  isHuman: boolean;
+} {
+  return {
+    name: DEFAULT_NATION_NAMES[index % DEFAULT_NATION_NAMES.length],
+    color: PLAYER_COLORS[index % PLAYER_COLORS.length],
+    isHuman,
+  };
+}
+
+export function mapRadiusFromSize(id: MapSizeId): number {
+  return MAP_SIZE_PRESETS.find((p) => p.id === id)?.radius ?? 9;
+}
+
+export type { PlayerId };

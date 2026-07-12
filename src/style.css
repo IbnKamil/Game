@@ -351,3 +351,221 @@ button.wide {
     flex-wrap: wrap;
   }
 }
+
+/* —— Start menu —— */
+.menu-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  overflow: auto;
+  background:
+    radial-gradient(900px 500px at 15% 10%, rgba(61, 214, 195, 0.22), transparent 55%),
+    radial-gradient(700px 420px at 85% 20%, rgba(244, 211, 94, 0.14), transparent 50%),
+    linear-gradient(165deg, #102832 0%, #1a453c 48%, #16324a 100%);
+  animation: fadein 0.45s ease;
+}
+
+.menu-screen[hidden] {
+  display: none !important;
+}
+
+.menu-card {
+  width: min(720px, 100%);
+  background: rgba(8, 22, 28, 0.82);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 1.35rem 1.4rem 1.5rem;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+}
+
+.menu-brand {
+  font-family: var(--display);
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  margin-bottom: 0.35rem;
+}
+
+.menu-lead {
+  margin: 0 0 1.1rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.menu-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+}
+
+.field span {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.field input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent-2);
+}
+
+.field b {
+  font-size: 1.1rem;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.seg {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.seg-btn {
+  flex: 1;
+  min-width: 100px;
+}
+
+.seg-btn.active {
+  background: linear-gradient(135deg, #3dd6c3, #2bbbad);
+  color: #06241f;
+  border: none;
+  font-weight: 700;
+}
+
+.menu-section {
+  margin: 1.1rem 0 0.55rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.nation-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.nation-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 44px auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+}
+
+.nation-idx {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--c);
+  color: #041014;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.nation-row input[type='text'] {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  font-family: var(--font);
+}
+
+.nation-row input[type='color'] {
+  width: 40px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.nation-role {
+  font-size: 0.78rem;
+  color: var(--muted);
+  min-width: 48px;
+  text-align: right;
+}
+
+.menu-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  margin: 1rem 0;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.legend-item canvas {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+
+.menu-start {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1.05rem;
+}
+
+.shell[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 640px) {
+  .menu-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .menu-legend {
+    grid-template-columns: 1fr;
+  }
+
+  .nation-row {
+    grid-template-columns: 28px 1fr 40px;
+  }
+
+  .nation-role {
+    grid-column: 2 / -1;
+    text-align: left;
+  }
+}

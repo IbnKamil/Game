@@ -1,5 +1,5 @@
 import { cellKey, type GameConfig, type HexCell, type Player } from './types';
-import { PLAYER_COLORS } from './constants';
+import { PLAYER_COLORS, defaultPlayerSetup } from './constants';
 import { hexDistance, hexNeighbors } from './hex';
 
 /** Simple seeded PRNG (mulberry32). */
@@ -54,11 +54,14 @@ export function generateMap(config: GameConfig): {
 
   const players: Player[] = [];
   for (let i = 1; i <= config.playerCount; i++) {
+    const setup =
+      config.players[i - 1] ??
+      defaultPlayerSetup(i - 1, config.humanPlayerId === i);
     players.push({
       id: i,
-      name: i === config.humanPlayerId ? 'Вы' : `ИИ ${i}`,
-      color: PLAYER_COLORS[(i - 1) % PLAYER_COLORS.length],
-      isHuman: i === config.humanPlayerId,
+      name: setup.name || `Государство ${i}`,
+      color: setup.color || PLAYER_COLORS[(i - 1) % PLAYER_COLORS.length],
+      isHuman: setup.isHuman,
       alive: true,
     });
   }

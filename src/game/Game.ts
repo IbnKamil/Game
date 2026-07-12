@@ -4,6 +4,7 @@ import {
   STRONG_TOWER_COST,
   TOWER_COST,
   UNIT_COST,
+  UNIT_LABEL,
   houseKind,
   houseRankFromKind,
   isHouseBuilding,
@@ -308,7 +309,7 @@ export class Game {
       rank,
       turnsLeft: HOUSE_TRAIN_TURNS[rank],
     };
-    this.message = `Вызов юнита ${rank}: появится через ${HOUSE_TRAIN_TURNS[rank]} ход(а) возле домика.`;
+    this.message = `Вызов: ${UNIT_LABEL[rank]} — появится через ${HOUSE_TRAIN_TURNS[rank]} ход(а) возле домика.`;
   }
 
   private tryMoveUnit(fromKey: string, toKey: string): void {
@@ -436,8 +437,8 @@ export class Game {
         rank,
         moved: true, // cannot move on spawn turn
       };
-      if (owner === this.config.humanPlayerId) {
-        this.message = `Юнит ранга ${rank} появился возле домика!`;
+      if (this.players.find((p) => p.id === owner)?.isHuman) {
+        this.message = `${UNIT_LABEL[rank]} появились возле домика!`;
       }
     }
   }

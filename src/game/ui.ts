@@ -1,15 +1,27 @@
-import { HOUSE_COST, STRONG_TOWER_COST, TOWER_COST, UNIT_COST, houseRankFromKind } from './constants';
+import {
+  HOUSE_COST,
+  STRONG_TOWER_COST,
+  TOWER_COST,
+  UNIT_COST,
+  UNIT_LABEL,
+  houseRankFromKind,
+} from './constants';
 import { calcIncome, calcUpkeep, farmCost, netIncome } from './economy';
 import type { Game } from './Game';
 import type { SelectionMode } from './types';
 
 export function mountHud(root: HTMLElement): {
+  root: HTMLElement;
+  shell: HTMLElement;
   panel: HTMLElement;
   update: (game: Game) => void;
+  setVisible: (visible: boolean) => void;
   on: (handlers: HudHandlers) => void;
 } {
-  root.innerHTML = `
-    <div class="shell">
+  const shell = document.createElement('div');
+  shell.className = 'shell';
+  shell.hidden = true;
+  shell.innerHTML = `
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark">⬡</span>
@@ -22,7 +34,7 @@ export function mountHud(root: HTMLElement): {
         <div class="top-actions">
           <button type="button" data-act="undo" title="Отменить">↩</button>
           <button type="button" data-act="end" class="primary">Конец хода</button>
-          <button type="button" data-act="new">Новая</button>
+          <button type="button" data-act="menu">Меню</button>
         </div>
       </header>
       <div class="main">
@@ -33,40 +45,41 @@ export function mountHud(root: HTMLElement): {
       <div class="modal" id="winModal" hidden>
         <div class="modal-card">
           <h2 id="winTitle">Победа</h2>
-          <button type="button" data-act="new" class="primary">Играть снова</button>
+          <button type="button" data-act="menu" class="primary">В меню</button>
         </div>
       </div>
-    </div>
   `;
+  root.appendChild(shell);
 
-  const panel = root.querySelector('#sidebar') as HTMLElement;
+  const panel = shell.querySelector('#sidebar') as HTMLElement;
   const handlers: HudHandlers = {};
 
-  root.addEventListener('click', (e) => {
+  shell.addEventListener('click', (e) => {
     const t = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
     if (!t) return;
     const act = t.dataset.act!;
     if (act === 'end') handlers.endTurn?.();
     if (act === 'undo') handlers.undo?.();
-    if (act === 'new') handlers.newGame?.();
+    if (act === 'menu') handlers.menu?.();
     if (act === 'summon') handlers.summon?.();
     if (act.startsWith('build:')) handlers.build?.(act.slice(6) as SelectionMode);
   });
 
   function update(game: Game): void {
-    const status = root.querySelector('#statusLine')!;
+    const status = shell.querySelector('#statusLine')!;
     const player = game.currentPlayer();
     status.innerHTML = `
       <span class="pill" style="--c:${player.color}">${player.name}</span>
       <span>Ход ${game.turn}</span>
+      <span class="muted">${player.isHuman ? 'ваш ход' : 'ход ИИ'}</span>
     `;
 
-    const toast = root.querySelector('#toast') as HTMLElement;
+    const toast = shell.querySelector('#toast') as HTMLElement;
     toast.hidden = !game.message;
     toast.textContent = game.message;
 
-    const winModal = root.querySelector('#winModal') as HTMLElement;
-    const winTitle = root.querySelector('#winTitle')!;
+    const winModal = shell.querySelector('#winModal') as HTMLElement;
+    const winTitle = shell.querySelector('#winTitle')!;
     if (game.winnerId) {
       winModal.hidden = false;
       const w = game.players.find((p) => p.id === game.winnerId);
@@ -79,7 +92,7 @@ export function mountHud(root: HTMLElement): {
     const sel = game.ui.selectedKey ? game.cells[game.ui.selectedKey] : null;
     const human = game.currentPlayer().isHuman && !game.winnerId;
 
-    let html = `<h3>Игроки</h3><ul class="players">`;
+    let html = `<h3>Государства</h3><ul class="players">`;
     for (const p of game.players) {
       const money = game.provinces
         .filter((pr) => pr.owner === p.id)
@@ -87,7 +100,7 @@ export function mountHud(root: HTMLElement): {
       html += `<li class="${p.alive ? '' : 'dead'} ${p.id === game.currentPlayerId ? 'active' : ''}">
         <span class="dot" style="background:${p.color}"></span>
         ${p.name}
-        <span class="muted">${p.alive ? money + '🪙' : '✕'}</span>
+        <span class="muted">${p.alive ? money + '🪙' : '✕'}${p.isHuman ? '' : ' · ИИ'}</span>
       </li>`;
     }
     html += `</ul>`;
@@ -137,27 +150,35 @@ export function mountHud(root: HTMLElement): {
       if (rank) {
         html += `<h3>Домик ${rank}</h3>`;
         if (sel.training) {
-          html += `<p>Обучение юнита ${sel.training.rank}: осталось <b>${sel.training.turnsLeft}</b> ход(а).</p>`;
+          html += `<p>Обучение: ${UNIT_LABEL[sel.training.rank]}, осталось <b>${sel.training.turnsLeft}</b> ход(а).</p>`;
         } else if (human) {
           const cost = UNIT_COST[rank];
           const can = (prov?.money ?? 0) >= cost;
-          html += `<p>Вызов юнита ранга ${rank} за ${cost}🪙.<br/>Появится через ${rank} ход(а) возле домика.</p>`;
-          html += `<button type="button" class="primary wide" data-act="summon" ${can ? '' : 'disabled'}>Вызвать юнита ${rank}</button>`;
+          html += `<p>Вызов: <b>${UNIT_LABEL[rank]}</b> за ${cost}🪙.<br/>Появятся через ${rank} ход(а) возле домика.</p>`;
+          html += `<button type="button" class="primary wide" data-act="summon" ${can ? '' : 'disabled'}>Вызвать: ${UNIT_LABEL[rank]}</button>`;
         }
       }
     }
 
     if (sel?.unit) {
-      html += `<h3>Юнит</h3><p>Ранг ${sel.unit.rank}${sel.unit.moved ? ' (уже ходил)' : ''}. Защита соседних клеток = ранг.</p>`;
+      const label = UNIT_LABEL[sel.unit.rank];
+      html += `<h3>${label}</h3><p>Ранг ${sel.unit.rank}${sel.unit.moved ? ' (уже ходили)' : ''}. Защита соседних клеток = ранг.</p>`;
     }
 
     html += `
+      <h3>Юниты</h3>
+      <ul class="rules">
+        <li>1 — 5 ополченцев с ружьями</li>
+        <li>2 — 3 солдата</li>
+        <li>3 — 3 спецназовца</li>
+        <li>4 — танк</li>
+      </ul>
       <h3>Правила кратко</h3>
       <ul class="rules">
         <li>Доход с гексов и ферм; юниты едят монеты.</li>
         <li>Захват: ранг юнита &gt; защиты клетки.</li>
-        <li>Ранги: 1 крестьянин … 4 рыцарь. Объединение юнитов усиливает ранг.</li>
-        <li><b>Домики I–IV</b> — единственный способ вызвать юнитов; ждут 1–4 хода.</li>
+        <li>Объединение юнитов усиливает ранг (до 4).</li>
+        <li><b>Домики I–IV</b> — единственный способ вызвать юнитов.</li>
       </ul>
     `;
 
@@ -165,8 +186,13 @@ export function mountHud(root: HTMLElement): {
   }
 
   return {
+    root,
+    shell,
     panel,
     update,
+    setVisible(visible: boolean) {
+      shell.hidden = !visible;
+    },
     on(h) {
       Object.assign(handlers, h);
     },
@@ -180,7 +206,7 @@ function btn(act: string, label: string, enabled: boolean): string {
 interface HudHandlers {
   endTurn?: () => void;
   undo?: () => void;
-  newGame?: () => void;
+  menu?: () => void;
   summon?: () => void;
   build?: (mode: SelectionMode) => void;
 }

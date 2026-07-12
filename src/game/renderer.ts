@@ -1,7 +1,7 @@
-import { BUILDING_PROTECTION, houseRankFromKind, isHouseBuilding } from './constants';
 import type { Game } from './Game';
 import { hexCorners, hexToPixel, pixelToHex } from './hex';
-import { cellKey } from './types';
+import { drawBuildingFigurine, drawUnitFigurine } from './sprites';
+import { cellKey, type UnitRank } from './types';
 
 const HEX_SIZE = 28;
 
@@ -63,7 +63,6 @@ export class Renderer {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
 
-    // Atmospheric background
     const grad = ctx.createLinearGradient(0, 0, w, h);
     grad.addColorStop(0, '#1a3a4a');
     grad.addColorStop(0.45, '#245a48');
@@ -71,7 +70,6 @@ export class Renderer {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
 
-    // Soft vignette light
     const radial = ctx.createRadialGradient(w * 0.5, h * 0.4, 40, w * 0.5, h * 0.5, w * 0.7);
     radial.addColorStop(0, 'rgba(255,255,255,0.06)');
     radial.addColorStop(1, 'rgba(0,0,0,0.25)');
@@ -118,7 +116,6 @@ export class Renderer {
         ctx.stroke();
       }
 
-      // Tree
       if (cell.tree) {
         ctx.fillStyle = cell.palm ? '#2b8a3e' : '#1b4332';
         ctx.beginPath();
@@ -128,14 +125,14 @@ export class Renderer {
         ctx.fillRect(x - 1.5, y + 2, 3, 6);
       }
 
-      // Building
       if (cell.building) {
-        this.drawBuilding(ctx, x, y, cell.building, cell.training?.turnsLeft ?? null);
+        drawBuildingFigurine(ctx, x, y - 2, cell.building, cell.training?.turnsLeft ?? null);
       }
 
-      // Unit
       if (cell.unit) {
-        this.drawUnit(ctx, x, y + (cell.building ? 6 : 0), cell.unit.rank, cell.unit.moved);
+        const team = game.players.find((p) => p.id === cell.unit!.owner)?.color ?? '#212529';
+        const uy = cell.building ? y + 8 : y + 2;
+        drawUnitFigurine(ctx, x, uy, cell.unit.rank as UnitRank, cell.unit.moved, team);
       }
     }
 
@@ -158,102 +155,5 @@ export class Renderer {
       map.set(game.ui.hoverKey, '#a5d8ff');
     }
     return map;
-  }
-
-  private drawBuilding(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    kind: string,
-    trainLeft: number | null,
-  ): void {
-    ctx.save();
-    if (kind === 'castle') {
-      ctx.fillStyle = '#f8f1e3';
-      ctx.fillRect(x - 8, y - 6, 16, 12);
-      ctx.fillStyle = '#c92a2a';
-      ctx.beginPath();
-      ctx.moveTo(x - 8, y - 6);
-      ctx.lineTo(x, y - 14);
-      ctx.lineTo(x + 8, y - 6);
-      ctx.fill();
-    } else if (kind === 'farm') {
-      ctx.fillStyle = '#f4a261';
-      ctx.fillRect(x - 9, y - 4, 18, 10);
-      ctx.fillStyle = '#e9c46a';
-      ctx.beginPath();
-      ctx.moveTo(x - 10, y - 4);
-      ctx.lineTo(x, y - 12);
-      ctx.lineTo(x + 10, y - 4);
-      ctx.fill();
-    } else if (kind === 'tower' || kind === 'strongTower') {
-      ctx.fillStyle = kind === 'strongTower' ? '#495057' : '#868e96';
-      ctx.fillRect(x - 5, y - 10, 10, 16);
-      ctx.fillStyle = '#212529';
-      ctx.beginPath();
-      ctx.moveTo(x - 7, y - 10);
-      ctx.lineTo(x, y - 18);
-      ctx.lineTo(x + 7, y - 10);
-      ctx.fill();
-      const prot = BUILDING_PROTECTION[kind as 'tower' | 'strongTower'];
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 9px Outfit, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(String(prot), x, y + 2);
-    } else if (isHouseBuilding(kind as 'house1')) {
-      const rank = houseRankFromKind(kind as 'house1')!;
-      const colors = ['#94d82d', '#74c0fc', '#ff922b', '#e599f7'];
-      ctx.fillStyle = colors[rank - 1];
-      // House shape
-      ctx.fillRect(x - 8, y - 2, 16, 10);
-      ctx.beginPath();
-      ctx.moveTo(x - 10, y - 2);
-      ctx.lineTo(x, y - 12);
-      ctx.lineTo(x + 10, y - 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = '#212529';
-      ctx.font = 'bold 10px Outfit, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`H${rank}`, x, y + 6);
-      if (trainLeft !== null) {
-        ctx.fillStyle = '#fff';
-        ctx.beginPath();
-        ctx.arc(x + 10, y - 10, 7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#c92a2a';
-        ctx.font = 'bold 9px Outfit, sans-serif';
-        ctx.fillText(String(trainLeft), x + 10, y - 7);
-      }
-    }
-    ctx.restore();
-  }
-
-  private drawUnit(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    rank: number,
-    moved: boolean,
-  ): void {
-    ctx.save();
-    ctx.globalAlpha = moved ? 0.55 : 1;
-    ctx.fillStyle = '#212529';
-    ctx.beginPath();
-    ctx.arc(x, y, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 11px Outfit, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(rank), x, y + 0.5);
-    // Rank pips
-    ctx.fillStyle = '#ffd43b';
-    for (let i = 0; i < rank; i++) {
-      ctx.beginPath();
-      ctx.arc(x - 6 + i * 4, y - 11, 1.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
   }
 }

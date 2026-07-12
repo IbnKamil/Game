@@ -59,6 +59,13 @@ export interface Player {
   alive: boolean;
 }
 
+/** Setup entry from the start menu. */
+export interface PlayerSetup {
+  name: string;
+  color: string;
+  isHuman: boolean;
+}
+
 export type SelectionMode =
   | 'none'
   | 'unit'
@@ -74,8 +81,10 @@ export type SelectionMode =
 export interface GameConfig {
   mapRadius: number;
   playerCount: number;
-  humanPlayerId: PlayerId;
+  /** @deprecated use players[].isHuman — kept for older call sites */
+  humanPlayerId?: PlayerId;
   seed: number;
+  players: PlayerSetup[];
 }
 
 export interface GameSnapshot {

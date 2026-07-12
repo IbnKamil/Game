@@ -1,49 +1,71 @@
 import './style.css';
 import { runAiTurn } from './game/ai';
 import { Game } from './game/Game';
+import { defaultMenuState, mountMenu } from './game/menu';
 import { Renderer } from './game/renderer';
 import type { GameConfig, SelectionMode } from './game/types';
 import { cellKey } from './game/types';
 import { mountHud } from './game/ui';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
+const menuState = defaultMenuState();
 const hud = mountHud(app);
-const canvas = document.querySelector<HTMLCanvasElement>('#gameCanvas')!;
-const renderer = new Renderer(canvas);
 
-let game = createGame();
+let game: Game | null = null;
+let renderer: Renderer | null = null;
 let aiTimer: number | null = null;
+let canvas: HTMLCanvasElement | null = null;
 
-function createGame(): Game {
-  const config: GameConfig = {
-    mapRadius: 9,
-    playerCount: 4,
-    humanPlayerId: 1,
-    seed: (Math.random() * 1e9) | 0,
-  };
-  return new Game(config);
+const menu = mountMenu(app, menuState, (config) => {
+  startGame(config);
+});
+
+function startGame(config: GameConfig): void {
+  stopAi();
+  menu.hide();
+  hud.setVisible(true);
+  game = new Game(config);
+  canvas = document.querySelector<HTMLCanvasElement>('#gameCanvas');
+  if (!canvas) return;
+  renderer = new Renderer(canvas);
+  bindCanvas(canvas);
+  renderer.resize();
+  renderer.centerOnMap(game);
+  render();
+  scheduleAi();
+}
+
+function backToMenu(): void {
+  stopAi();
+  game = null;
+  hud.setVisible(false);
+  menu.show();
 }
 
 function render(): void {
+  if (!game || !renderer) return;
   renderer.draw(game);
   hud.update(game);
 }
 
-function scheduleAi(): void {
+function stopAi(): void {
   if (aiTimer !== null) {
     window.clearTimeout(aiTimer);
     aiTimer = null;
   }
-  if (game.winnerId) return;
+}
+
+function scheduleAi(): void {
+  stopAi();
+  if (!game || game.winnerId) return;
   if (game.currentPlayer().isHuman) return;
 
   aiTimer = window.setTimeout(() => {
+    if (!game) return;
     runAiTurn(game, game.currentPlayerId);
     render();
     window.setTimeout(() => {
-      if (!game.winnerId && !game.currentPlayer().isHuman) {
-        // still AI somehow — shouldn't happen
-      }
+      if (!game || game.winnerId) return;
       game.endTurn();
       render();
       scheduleAi();
@@ -52,7 +74,7 @@ function scheduleAi(): void {
 }
 
 function endTurnFlow(): void {
-  if (!game.currentPlayer().isHuman || game.winnerId) return;
+  if (!game || !game.currentPlayer().isHuman || game.winnerId) return;
   game.endTurn();
   render();
   scheduleAi();
@@ -61,57 +83,61 @@ function endTurnFlow(): void {
 hud.on({
   endTurn: endTurnFlow,
   undo: () => {
-    if (!game.currentPlayer().isHuman) return;
+    if (!game?.currentPlayer().isHuman) return;
     game.undo();
     render();
   },
-  newGame: () => {
-    game = createGame();
-    renderer.centerOnMap(game);
-    render();
-    scheduleAi();
-  },
+  menu: backToMenu,
   summon: () => {
-    game.summonFromHouse();
+    game?.summonFromHouse();
     render();
   },
   build: (mode: SelectionMode) => {
-    game.setBuildMode(mode);
+    game?.setBuildMode(mode);
     render();
   },
 });
 
-canvas.addEventListener('click', (e) => {
-  if (!game.currentPlayer().isHuman || game.winnerId) return;
-  const rect = canvas.getBoundingClientRect();
-  const { q, r } = renderer.screenToHex(e.clientX - rect.left, e.clientY - rect.top);
-  const key = cellKey(q, r);
-  if (!game.cells[key]) {
-    game.clearSelection();
-  } else {
-    game.selectHex(key);
-  }
-  render();
-});
+let canvasBound = false;
+function bindCanvas(c: HTMLCanvasElement): void {
+  if (canvasBound) return;
+  canvasBound = true;
 
-canvas.addEventListener('mousemove', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const { q, r } = renderer.screenToHex(e.clientX - rect.left, e.clientY - rect.top);
-  const key = cellKey(q, r);
-  const next = game.cells[key] ? key : null;
-  if (next !== game.ui.hoverKey) {
-    game.ui.hoverKey = next;
-    renderer.draw(game);
-  }
-});
+  c.addEventListener('click', (e) => {
+    if (!game || !renderer || !game.currentPlayer().isHuman || game.winnerId) return;
+    const rect = c.getBoundingClientRect();
+    const { q, r } = renderer.screenToHex(e.clientX - rect.left, e.clientY - rect.top);
+    const key = cellKey(q, r);
+    if (!game.cells[key]) {
+      game.clearSelection();
+    } else {
+      game.selectHex(key);
+    }
+    render();
+  });
+
+  c.addEventListener('mousemove', (e) => {
+    if (!game || !renderer) return;
+    const rect = c.getBoundingClientRect();
+    const { q, r } = renderer.screenToHex(e.clientX - rect.left, e.clientY - rect.top);
+    const key = cellKey(q, r);
+    const next = game.cells[key] ? key : null;
+    if (next !== game.ui.hoverKey) {
+      game.ui.hoverKey = next;
+      renderer.draw(game);
+    }
+  });
+}
 
 window.addEventListener('resize', () => {
+  if (!game || !renderer) return;
   renderer.resize();
   renderer.centerOnMap(game);
   render();
 });
 
 window.addEventListener('keydown', (e) => {
+  if (!game || hud.shell.hidden) return;
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();
     endTurnFlow();
@@ -127,7 +153,5 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-renderer.resize();
-renderer.centerOnMap(game);
-render();
-scheduleAi();
+// Start on menu
+menu.show();

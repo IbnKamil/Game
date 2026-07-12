@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { HOUSE_COST, HOUSE_TRAIN_TURNS, UNIT_COST } from './constants';
+import { HOUSE_COST, HOUSE_TRAIN_TURNS, UNIT_COST, defaultPlayerSetup } from './constants';
 import { canCapture, defenseStrength, netIncome } from './economy';
 import { Game } from './Game';
+import { menuToConfig, defaultMenuState, syncPlayers } from './menu';
 import { cellKey, type GameConfig, type Unit } from './types';
 
 function makeGame(seed = 42): Game {
+  const players = Array.from({ length: 3 }, (_, i) => defaultPlayerSetup(i, i === 0));
   const config: GameConfig = {
     mapRadius: 7,
     playerCount: 3,
-    humanPlayerId: 1,
     seed,
+    players,
   };
   return new Game(config);
 }
@@ -18,6 +20,8 @@ describe('Game bootstrap', () => {
   it('creates map with players and castles', () => {
     const g = makeGame();
     expect(g.players).toHaveLength(3);
+    expect(g.players[0].isHuman).toBe(true);
+    expect(g.players[0].name.length).toBeGreaterThan(0);
     expect(Object.keys(g.cells).length).toBeGreaterThan(20);
     expect(g.provinces.length).toBeGreaterThanOrEqual(3);
     for (const p of g.players) {
@@ -25,6 +29,30 @@ describe('Game bootstrap', () => {
       expect(provs.length).toBeGreaterThanOrEqual(1);
       expect(provs.some((pr) => g.cells[pr.capitalKey].building === 'castle')).toBe(true);
     }
+  });
+});
+
+describe('Start menu config', () => {
+  it('builds config from menu state with custom nations', () => {
+    const state = defaultMenuState();
+    state.playerCount = 5;
+    state.humanCount = 2;
+    state.mapSize = 'large';
+    syncPlayers(state);
+    state.players[0].name = 'Тестовая Республика';
+    state.players[0].color = '#112233';
+    const config = menuToConfig(state);
+    expect(config.playerCount).toBe(5);
+    expect(config.mapRadius).toBe(12);
+    expect(config.players.filter((p) => p.isHuman)).toHaveLength(2);
+    expect(config.players[0].name).toBe('Тестовая Республика');
+
+    const g = new Game(config);
+    expect(g.players).toHaveLength(5);
+    expect(g.players[0].name).toBe('Тестовая Республика');
+    expect(g.players[0].color).toBe('#112233');
+    expect(g.players[1].isHuman).toBe(true);
+    expect(g.players[2].isHuman).toBe(false);
   });
 });
 
@@ -55,7 +83,6 @@ describe('Barracks houses', () => {
     });
     expect(prov.money).toBe(before - UNIT_COST[1]);
 
-    // Simulate start of next turn for player 1
     g.processTraining(1);
     expect(g.cells[empty!].training).toBeNull();
 
@@ -64,20 +91,12 @@ describe('Barracks houses', () => {
     );
     expect(spawned.length).toBe(1);
 
-    // Must be adjacent to house (or on house hex)
     const house = g.cells[empty!];
     const u = spawned[0];
-    const dist = Math.max(
-      Math.abs(u.q - house.q),
-      Math.abs(u.r - house.r),
-      Math.abs(-u.q - u.r - (-house.q - house.r)),
-    );
-    // axial distance
     const aq = u.q - house.q;
     const ar = u.r - house.r;
     const axialDist = (Math.abs(aq) + Math.abs(ar) + Math.abs(-aq - ar)) / 2;
     expect(axialDist).toBeLessThanOrEqual(1);
-    void dist;
   });
 
   it('house2 takes 2 turns to spawn', () => {
@@ -115,7 +134,6 @@ describe('Combat', () => {
     const targetKey = enemyProv.hexes.find((h) => !g.cells[h].building) ?? enemyProv.hexes[0];
     const target = g.cells[targetKey];
 
-    // Clear defenses
     target.unit = null;
     target.building = null;
     for (const n of [
@@ -140,7 +158,7 @@ describe('Combat', () => {
     if (def === 0) {
       expect(canCapture(g.cells, attacker, target.q, target.r)).toBe(true);
     } else {
-      attacker.rank = (def as 1 | 2 | 3) + 1 > 4 ? 4 : (((def + 1) as 1 | 2 | 3 | 4));
+      attacker.rank = (def + 1 > 4 ? 4 : ((def + 1) as 1 | 2 | 3 | 4));
       expect(canCapture(g.cells, attacker, target.q, target.r)).toBe(true);
     }
   });
