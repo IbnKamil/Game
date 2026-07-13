@@ -141,23 +141,23 @@ export function mountHud(root: HTMLElement): {
       if (human) {
         const fc = farmCost(game.cells, prov);
         html += `<h3>Постройки</h3><div class="btn-grid">`;
-        html += btn('build:buildFarm', `Ферма (${fc})`, prov.money >= fc);
-        html += btn('build:buildTower', `Башня (${TOWER_COST})`, prov.money >= TOWER_COST);
+        html += btn('build:buildFarm', `[1] Ферма (${fc})`, prov.money >= fc);
+        html += btn('build:buildTower', `[2] Башня (${TOWER_COST})`, prov.money >= TOWER_COST);
         html += btn(
           'build:buildStrongTower',
-          `Кр. башня (${STRONG_TOWER_COST})`,
+          `[3] Кр. башня (${STRONG_TOWER_COST})`,
           prov.money >= STRONG_TOWER_COST,
         );
         html += `</div><h3>Здания призыва</h3><div class="btn-grid">`;
         for (const r of [1, 2, 3, 4] as const) {
           html += btn(
             `build:buildHouse${r}`,
-            `${RECRUIT_LABEL[r]} (${HOUSE_COST[r]})`,
+            `[${r + 3}] ${RECRUIT_LABEL[r]} (${HOUSE_COST[r]})`,
             prov.money >= HOUSE_COST[r],
           );
         }
         html += `</div>`;
-        html += `<p class="hint">Клик по домику / казарме / штабу / заводу открывает окно вызова. Юнит появляется через N ходов рядом со зданием.</p>`;
+        html += `<p class="hint">Клавиши 1–7 — постройки. «ё» / Enter — конец хода. Клик по зданию призыва открывает вызов (юнит ×1 через N ходов).</p>`;
       }
     } else {
       html += `<p class="hint">Выберите свою провинцию на карте.</p>`;
@@ -165,16 +165,20 @@ export function mountHud(root: HTMLElement): {
 
     if (sel?.unit) {
       const label = UNIT_LABEL[sel.unit.rank];
-      html += `<h3>${label}</h3><p>Ранг ${sel.unit.rank}${sel.unit.moved ? ' (уже ходили)' : ''}. По своей земле — до 2 клеток. Атака — на соседнюю.</p>`;
+      const n = sel.unit.count ?? 1;
+      html += `<h3>${label} ×${n}</h3><p>Ранг ${sel.unit.rank}${sel.unit.moved ? ' (уже ходили)' : ''}. Свои того же ранга — объединение. Атака равных — если ваш × больше.</p>`;
     }
 
     html += `
       <h3>Юниты</h3>
       <ul class="rules">
-        <li>1 — 5 ополченцев с ружьями</li>
-        <li>2 — 10 солдат</li>
-        <li>3 — 3 спецназовца + машина с пулемётом</li>
+        <li>1 — ополченец (охотник), стак ×N</li>
+        <li>2 — солдат, стак ×N</li>
+        <li>3 — спецназ (+машина)</li>
         <li>4 — танк</li>
+        <li>На карте до 5 фигурок; × может быть больше</li>
+        <li>Равный ранг: атака если ваш × выше, теряете × врага</li>
+        <li>Выше рангом — уничтожает без потерь</li>
       </ul>
       <h3>Правила кратко</h3>
       <ul class="rules">

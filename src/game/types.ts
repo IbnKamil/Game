@@ -24,6 +24,8 @@ export interface Unit {
   owner: PlayerId;
   rank: UnitRank;
   moved: boolean;
+  /** Stack size (×N). Spawns at 1; merges add counts. */
+  count: number;
 }
 
 export interface TrainingQueue {

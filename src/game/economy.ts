@@ -201,7 +201,37 @@ export function defenseStrength(
   return strength;
 }
 
-/** Can attacker of given rank capture target hex? Must be strictly greater than defense (knights can kill knights: rank >= defense for knight vs knight — classic: strength must be > protection, except knights beat knights). */
+/** Defense excluding the unit standing on the hex (buildings + adjacent still count). */
+export function defenseStrengthExcludingHexUnit(
+  cells: Record<string, HexCell>,
+  q: number,
+  r: number,
+  forOwner: PlayerId,
+): number {
+  const key = cellKey(q, r);
+  const cell = cells[key];
+  if (!cell || cell.owner !== forOwner) return 0;
+
+  let strength = 0;
+  if (cell.building) {
+    strength = Math.max(strength, BUILDING_PROTECTION[cell.building]);
+  }
+
+  for (const n of hexNeighbors(q, r)) {
+    const nc = cells[cellKey(n.q, n.r)];
+    if (!nc || nc.owner !== forOwner) continue;
+    if (nc.unit && nc.unit.owner === forOwner) {
+      strength = Math.max(strength, nc.unit.rank);
+    }
+    if (nc.building) {
+      const prot = BUILDING_PROTECTION[nc.building];
+      if (prot > 0) strength = Math.max(strength, prot);
+    }
+  }
+  return strength;
+}
+
+/** Can attacker capture target hex? */
 export function canCapture(
   cells: Record<string, HexCell>,
   attacker: Unit,
@@ -212,8 +242,17 @@ export function canCapture(
   if (!target) return false;
   if (target.owner === attacker.owner) return false;
 
+  const atkCount = attacker.count ?? 1;
+
+  // Same-rank unit duel: need higher stack, and still beat buildings/adjacent cover
+  if (target.unit && target.unit.rank === attacker.rank) {
+    const cover = defenseStrengthExcludingHexUnit(cells, targetQ, targetR, target.owner);
+    if (!(attacker.rank > cover || (attacker.rank === 4 && cover === 4))) return false;
+    return atkCount > (target.unit.count ?? 1);
+  }
+
   const defense = defenseStrength(cells, targetQ, targetR, target.owner);
-  if (attacker.rank === 4 && defense === 4) return true; // knight vs knight
+  if (attacker.rank === 4 && defense === 4) return true;
   return attacker.rank > defense;
 }
 
@@ -225,9 +264,9 @@ export function canMoveOntoFriendly(
 ): boolean {
   const target = cells[cellKey(targetQ, targetR)];
   if (!target || target.owner !== unit.owner) return false;
-  // Merging disabled — destination must be empty of units
-  if (target.unit) return false;
-  return true;
+  if (!target.unit) return true;
+  // Same-rank stacks may merge
+  return target.unit.rank === unit.rank;
 }
 
 export function applyIncomeAndStarve(

@@ -139,10 +139,10 @@ export function mountMenu(
         </div>
 
         <div class="menu-legend">
-          <div class="legend-item"><canvas data-preview="unit1" width="110" height="56"></canvas><span>1 — 5 ополченцев</span></div>
-          <div class="legend-item"><canvas data-preview="unit2" width="120" height="60"></canvas><span>2 — 10 солдат</span></div>
-          <div class="legend-item"><canvas data-preview="unit3" width="120" height="60"></canvas><span>3 — спецназ + пулемётная машина</span></div>
-          <div class="legend-item"><canvas data-preview="unit4" width="120" height="60"></canvas><span>4 — танк</span></div>
+          <div class="legend-item"><canvas data-preview="unit1" width="110" height="56"></canvas><span>1 — ополченец (охотник) ×1, стак до ×N</span></div>
+          <div class="legend-item"><canvas data-preview="unit2" width="120" height="60"></canvas><span>2 — солдат ×1, стак до ×N</span></div>
+          <div class="legend-item"><canvas data-preview="unit3" width="120" height="60"></canvas><span>3 — спецназ ×1 (+машина)</span></div>
+          <div class="legend-item"><canvas data-preview="unit4" width="120" height="60"></canvas><span>4 — танк ×1</span></div>
         </div>
 
         <button type="button" class="primary menu-start" data-act="start">Начать игру</button>
@@ -246,7 +246,7 @@ function paintPreviews(root: HTMLElement): void {
       if (!canvas) continue;
       const ctx = canvas.getContext('2d')!;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawUnitFigurine(ctx, canvas.width / 2, canvas.height / 2 + 8, rank, false, color);
+      drawUnitFigurine(ctx, canvas.width / 2, canvas.height / 2 + 8, rank, false, color, { count: 1 });
     }
   };
   paint();

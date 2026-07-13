@@ -272,7 +272,9 @@ export class Renderer {
       if (cell.unit) {
         const team = this.ownerColors.get(cell.unit.owner) ?? '#212529';
         const uy = cell.building ? y + 10 : y + 3;
-        drawUnitFigurine(ctx, x, uy, cell.unit.rank as UnitRank, cell.unit.moved, team);
+        drawUnitFigurine(ctx, x, uy, cell.unit.rank as UnitRank, cell.unit.moved, team, {
+          count: cell.unit.count ?? 1,
+        });
       }
     }
   }

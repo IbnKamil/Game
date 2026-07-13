@@ -3,6 +3,7 @@ import { runAiTurn } from './ai';
 import { HOUSE_COST, HOUSE_TRAIN_TURNS, UNIT_COST, defaultPlayerSetup } from './constants';
 import { canCapture, defenseStrength, netIncome } from './economy';
 import { Game } from './Game';
+import { hexNeighbors } from './hex';
 import { menuToConfig, defaultMenuState, syncPlayers } from './menu';
 import { cellKey, type GameConfig, type Unit } from './types';
 
@@ -158,7 +159,7 @@ describe('Combat', () => {
       }
     }
 
-    const attacker: Unit = { id: 99, owner: 1, rank: 1, moved: false };
+    const attacker: Unit = { id: 99, owner: 1, rank: 1, moved: false, count: 1 };
     const def = defenseStrength(g.cells, target.q, target.r, 2);
     if (def === 0) {
       expect(canCapture(g.cells, attacker, target.q, target.r)).toBe(true);
@@ -216,28 +217,22 @@ describe('AI actions', () => {
 });
 
 describe('Movement rules', () => {
-  it('allows 2-hex moves on own land and forbids merging', () => {
+  it('allows 2-hex moves on own land and same-rank merge targets', () => {
     const g = makeGame(33);
     const prov = g.provinces.find((p) => p.owner === 1)!;
     const start = prov.hexes[0];
     const startCell = g.cells[start];
-    startCell.unit = { id: 1, owner: 1, rank: 1, moved: false };
+    startCell.unit = { id: 1, owner: 1, rank: 1, moved: false, count: 1 };
     startCell.building = startCell.building === 'castle' ? 'castle' : null;
 
     const targets = g.moveTargets(start);
     expect(targets.size).toBeGreaterThan(0);
-    for (const t of targets) {
-      const c = g.cells[t];
-      if (c.owner === 1) {
-        expect(c.unit).toBeNull();
-      }
-    }
 
-    const occupied = [...targets][0];
-    if (occupied) {
-      g.cells[occupied].unit = { id: 2, owner: 1, rank: 1, moved: false };
+    const emptyOwn = [...targets].find((t) => g.cells[t].owner === 1 && !g.cells[t].unit);
+    if (emptyOwn) {
+      g.cells[emptyOwn].unit = { id: 2, owner: 1, rank: 1, moved: false, count: 1 };
       const again = g.moveTargets(start);
-      expect(again.has(occupied)).toBe(false);
+      expect(again.has(emptyOwn)).toBe(true);
     }
   });
 });
@@ -255,6 +250,63 @@ describe('Economy', () => {
       g.cells[empty].building = 'farm';
       expect(netIncome(g.cells, prov)).toBeGreaterThan(before);
     }
+  });
+});
+
+describe('Unit stacks', () => {
+  it('merges same-rank units and resolves same-rank combat by count', () => {
+    const g = makeGame(21);
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    const keys = prov.hexes.filter((h) => !g.cells[h].building);
+    expect(keys.length).toBeGreaterThanOrEqual(2);
+    const a = keys[0];
+    const b = keys[1];
+    g.cells[a].tree = false;
+    g.cells[b].tree = false;
+    g.cells[a].unit = { id: 1, owner: 1, rank: 1, moved: false, count: 2 };
+    g.cells[b].unit = { id: 2, owner: 1, rank: 1, moved: false, count: 1 };
+    // Ensure b is reachable (adjacent or clear path) — place adjacent
+    const aq = g.cells[a].q;
+    const ar = g.cells[a].r;
+    const adj = hexNeighbors(aq, ar).map((n) => cellKey(n.q, n.r)).find((k) => g.cells[k]?.owner === 1);
+    expect(adj).toBeTruthy();
+    const dest = adj!;
+    g.cells[dest].tree = false;
+    g.cells[dest].building = null;
+    g.cells[dest].unit = { id: 2, owner: 1, rank: 1, moved: false, count: 1 };
+    if (a !== dest) g.cells[a].unit = { id: 1, owner: 1, rank: 1, moved: false, count: 2 };
+    g.moveUnitTo(a, dest);
+    expect(g.cells[a].unit).toBeNull();
+    expect(g.cells[dest].unit?.count).toBe(3);
+
+    g.cells[dest].unit!.moved = false;
+    g.cells[dest].unit!.count = 3;
+    const nbr = hexNeighbors(g.cells[dest].q, g.cells[dest].r)
+      .map((n) => cellKey(n.q, n.r))
+      .find((k) => g.cells[k] && k !== dest)!;
+    g.cells[nbr].owner = 2;
+    g.cells[nbr].unit = { id: 9, owner: 2, rank: 1, moved: false, count: 1 };
+    g.cells[nbr].building = null;
+    g.cells[nbr].tree = false;
+    expect(canCapture(g.cells, g.cells[dest].unit!, g.cells[nbr].q, g.cells[nbr].r)).toBe(true);
+    g.moveUnitTo(dest, nbr);
+    expect(g.cells[nbr].unit?.owner).toBe(1);
+    expect(g.cells[nbr].unit?.count).toBe(2);
+  });
+
+  it('higher rank destroys lower without stack loss', () => {
+    const g = makeGame(22);
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    const home = prov.hexes.find((h) => !g.cells[h].building)!;
+    const cell = g.cells[home];
+    cell.unit = { id: 1, owner: 1, rank: 2, moved: false, count: 1 };
+    const nbr = hexNeighbors(cell.q, cell.r).map((n) => cellKey(n.q, n.r)).find((k) => g.cells[k])!;
+    g.cells[nbr].owner = 2;
+    g.cells[nbr].building = null;
+    g.cells[nbr].unit = { id: 2, owner: 2, rank: 1, moved: false, count: 5 };
+    g.moveUnitTo(home, nbr);
+    expect(g.cells[nbr].unit?.rank).toBe(2);
+    expect(g.cells[nbr].unit?.count).toBe(1);
   });
 });
 

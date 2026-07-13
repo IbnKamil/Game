@@ -1,4 +1,4 @@
-import { BUILDING_PROTECTION, UNIT_FIGURE_COUNT, houseRankFromKind, isHouseBuilding } from './constants';
+import { BUILDING_PROTECTION, UNIT_FIGURE_DRAW_MAX, houseRankFromKind, isHouseBuilding } from './constants';
 import type { BuildingKind, UnitRank } from './types';
 
 /** Highly detailed isometric 3D canvas figurines. */
@@ -190,37 +190,63 @@ export function drawUnitFigurine(
   rank: UnitRank,
   moved: boolean,
   teamColor: string,
-  _opts: { compact?: boolean } = {},
+  opts: { compact?: boolean; count?: number } = {},
 ): void {
   ctx.save();
   ctx.globalAlpha = moved ? 0.55 : 1;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'low';
 
-  // One photo sprite per unit (not 5–10 copies) — keeps map interaction smooth
-  if (rank === 1) drawMilitia(ctx, x, y, teamColor);
-  else if (rank === 2) drawSoldier(ctx, x, y, teamColor);
-  else if (rank === 3) {
-    drawGunTruck(ctx, x + 4, y + 4, teamColor);
-    drawSpecOps(ctx, x - 6, y - 2, teamColor);
-  } else {
-    drawTank(ctx, x, y, teamColor);
+  const count = Math.max(1, opts.count ?? 1);
+  const figures = Math.min(count, UNIT_FIGURE_DRAW_MAX);
+  const offs = stackOffsets(figures);
+
+  if (rank === 3) {
+    drawGunTruck(ctx, x + 4, y + 6, teamColor);
+  }
+
+  for (const o of offs) {
+    const fx = x + o.dx;
+    const fy = y + o.dy;
+    if (rank === 1) drawMilitia(ctx, fx, fy, teamColor);
+    else if (rank === 2) drawSoldier(ctx, fx, fy, teamColor);
+    else if (rank === 3) drawSpecOps(ctx, fx, fy, teamColor);
+    else drawTank(ctx, fx, fy, teamColor);
   }
 
   drawBadge(ctx, x, y, rank);
-  const count = UNIT_FIGURE_COUNT[rank];
-  if (count > 1 && rank <= 2) {
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.beginPath();
-    ctx.arc(x + 12, y + 10, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 9px Outfit, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`×${count}`, x + 12, y + 10.5);
-  }
+  // Always show stack size ×N
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.beginPath();
+  ctx.arc(x + 12, y + 10, 7.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 9px Outfit, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`×${count}`, x + 12, y + 10.5);
   ctx.restore();
+}
+
+function stackOffsets(n: number): { dx: number; dy: number }[] {
+  if (n <= 1) return [{ dx: 0, dy: 0 }];
+  if (n === 2) return [{ dx: -7, dy: 2 }, { dx: 7, dy: -2 }];
+  if (n === 3) return [{ dx: -9, dy: 3 }, { dx: 0, dy: -3 }, { dx: 9, dy: 3 }];
+  if (n === 4) {
+    return [
+      { dx: -9, dy: -2 },
+      { dx: 9, dy: -2 },
+      { dx: -9, dy: 6 },
+      { dx: 9, dy: 6 },
+    ];
+  }
+  return [
+    { dx: -10, dy: 4 },
+    { dx: -5, dy: -3 },
+    { dx: 0, dy: 6 },
+    { dx: 5, dy: -3 },
+    { dx: 10, dy: 4 },
+  ];
 }
 
 /** Fast LOD icon when zoomed out or during pan/zoom. */

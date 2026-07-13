@@ -419,10 +419,24 @@ export class Game {
       return;
     }
 
-    // Friendly territory: move up to 2 hexes, no merging
+    // Friendly territory: move up to 2 hexes, or merge same-rank stacks
     if (to.owner === unit.owner) {
       if (to.unit) {
-        this.message = 'Клетка занята юнитом. Объединение отключено.';
+        if (to.unit.rank !== unit.rank) {
+          this.message = 'Можно объединять только юнитов одного ранга.';
+          return;
+        }
+        this.pushUndo();
+        const merged = (to.unit.count ?? 1) + (unit.count ?? 1);
+        to.unit = {
+          ...to.unit,
+          count: merged,
+          moved: true,
+        };
+        from.unit = null;
+        this.bumpUnits();
+        this.ui = { selectedKey: toKey, mode: 'none', hoverKey: this.ui.hoverKey };
+        this.message = `Объединено: ${UNIT_LABEL[unit.rank]} ×${merged}.`;
         return;
       }
 
@@ -436,7 +450,7 @@ export class Game {
         this.message = 'Юнит перемещён.';
       }
       from.unit = null;
-      to.unit = { ...unit, moved: true };
+      to.unit = { ...unit, count: unit.count ?? 1, moved: true };
       this.bumpUnits();
       this.ui = { selectedKey: toKey, mode: 'none', hoverKey: this.ui.hoverKey };
       return;
@@ -449,12 +463,23 @@ export class Game {
     }
 
     if (!canCapture(this.cells, unit, to.q, to.r)) {
-      const def = defenseStrength(this.cells, to.q, to.r, to.owner);
-      this.message = `Слишком сильная защита (${def}). Нужен ранг > ${def}.`;
+      if (to.unit && to.unit.rank === unit.rank) {
+        this.message = `Нужен больший отряд (у вас ×${unit.count ?? 1}, у врага ×${to.unit.count ?? 1}).`;
+      } else {
+        const def = defenseStrength(this.cells, to.q, to.r, to.owner);
+        this.message = `Слишком сильная защита (${def}). Нужен ранг > ${def}.`;
+      }
       return;
     }
 
     this.pushUndo();
+    const sameRankDuel = !!(to.unit && to.unit.rank === unit.rank);
+    let remaining = unit.count ?? 1;
+    if (sameRankDuel && to.unit) {
+      remaining = remaining - (to.unit.count ?? 1);
+      if (remaining < 1) remaining = 1; // safety; should not happen if canCapture
+    }
+
     to.unit = null;
     if (to.building) {
       to.building = null;
@@ -464,14 +489,16 @@ export class Game {
     to.palm = false;
     to.owner = unit.owner;
     from.unit = null;
-    to.unit = { ...unit, moved: true };
+    to.unit = { ...unit, count: remaining, moved: true };
 
     this.refreshProvinces();
     this.bumpTerrain();
     this.bumpUnits();
     if (this.batchDepth === 0) this.checkWinner();
     this.ui = { selectedKey: toKey, mode: 'none', hoverKey: this.ui.hoverKey };
-    this.message = 'Территория захвачена!';
+    this.message = sameRankDuel
+      ? `Победа в бою отрядов: осталось ×${remaining}.`
+      : 'Территория захвачена!';
   }
 
   /** Process house training at the start of a player's turn. */
@@ -498,6 +525,7 @@ export class Game {
         id: this.nextUnitId++,
         owner,
         rank,
+        count: 1,
         moved: true, // cannot move on spawn turn
       };
       this.bumpUnits();
@@ -575,7 +603,7 @@ export class Game {
     if (!from?.unit || from.unit.moved) return result;
     const unit = from.unit;
 
-    // Own territory: BFS up to 2 steps through owned hexes (no unit stacking)
+    // Own territory: BFS up to 2 steps through empty owned hexes; can land on same-rank stack
     const queue: { key: string; dist: number }[] = [{ key: fromKey, dist: 0 }];
     const seen = new Set<string>([fromKey]);
     while (queue.length) {
@@ -587,8 +615,13 @@ export class Game {
         if (seen.has(nk)) continue;
         const to = this.cells[nk];
         if (!to || to.owner !== unit.owner) continue;
-        // Can pass/land only if no other unit
-        if (to.unit) continue;
+        if (to.unit) {
+          if (to.unit.rank === unit.rank) {
+            seen.add(nk);
+            result.add(nk); // merge target — do not path through
+          }
+          continue;
+        }
         seen.add(nk);
         result.add(nk);
         queue.push({ key: nk, dist: dist + 1 });

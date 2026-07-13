@@ -16,8 +16,8 @@ export const UNIT_UPKEEP: Record<UnitRank, number> = {
 };
 
 export const UNIT_LABEL: Record<UnitRank, string> = {
-  1: 'Ополченцы',
-  2: 'Солдаты',
+  1: 'Ополченец',
+  2: 'Солдат',
   3: 'Спецназ',
   4: 'Танк',
 };
@@ -30,11 +30,14 @@ export const RECRUIT_LABEL: Record<HouseRank, string> = {
   4: 'Военный завод',
 };
 
-/** How many figures are drawn for each rank. */
+/** Max number of figurines drawn for a stack (× can be higher). */
+export const UNIT_FIGURE_DRAW_MAX = 5;
+
+/** @deprecated use unit.count; kept for menu copy compatibility */
 export const UNIT_FIGURE_COUNT: Record<UnitRank, number> = {
-  1: 5,
-  2: 10,
-  3: 3,
+  1: 1,
+  2: 1,
+  3: 1,
   4: 1,
 };
 

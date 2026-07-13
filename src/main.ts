@@ -268,7 +268,7 @@ window.addEventListener('resize', () => {
 window.addEventListener('keydown', (e) => {
   if (!game || hud.shell.hidden) return;
   if (e.repeat) return;
-  if (e.key === 'Enter' || e.key === ' ') {
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ё' || e.key === 'Ё' || e.key === '`') {
     e.preventDefault();
     endTurnFlow();
   }
@@ -287,6 +287,26 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === '-' || e.key === '_') {
     renderer?.zoomAt((viewport?.clientWidth ?? 0) / 2, (viewport?.clientHeight ?? 0) / 2, 1 / 1.1);
+  }
+
+  // Building hotkeys (require selected own province — setBuildMode checks)
+  if (game.currentPlayer().isHuman && !game.winnerId) {
+    const buildHotkeys: Record<string, SelectionMode> = {
+      '1': 'buildFarm',
+      '2': 'buildTower',
+      '3': 'buildStrongTower',
+      '4': 'buildHouse1',
+      '5': 'buildHouse2',
+      '6': 'buildHouse3',
+      '7': 'buildHouse4',
+    };
+    const mode = buildHotkeys[e.key];
+    if (mode) {
+      e.preventDefault();
+      game.setBuildMode(mode);
+      paintOverlay();
+      scheduleHud();
+    }
   }
 });
 
