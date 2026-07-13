@@ -41,6 +41,8 @@ export class Renderer {
 
   private sortedCells: HexCell[] = [];
   private cellCount = -1;
+  /** Detect undo/restore replacing the cells object (same count, new refs). */
+  private cellsRef: Record<string, HexCell> | null = null;
   private posX = new Float32Array(0);
   private posY = new Float32Array(0);
   private ownerColors = new Map<number, string>();
@@ -136,7 +138,16 @@ export class Renderer {
 
   private refreshCellCache(game: Game): void {
     const n = Object.keys(game.cells).length;
-    if (n === this.cellCount && this.sortedCells.length === n) return;
+    // Must refresh when undo/restore swaps in a new cells record — count stays the same
+    // but sortedCells would otherwise keep drawing the pre-undo HexCell objects.
+    if (
+      this.cellsRef === game.cells &&
+      n === this.cellCount &&
+      this.sortedCells.length === n
+    ) {
+      return;
+    }
+    this.cellsRef = game.cells;
     this.sortedCells = Object.values(game.cells).sort((a, b) => a.r - b.r || a.q - b.q);
     this.cellCount = n;
     this.posX = new Float32Array(n);

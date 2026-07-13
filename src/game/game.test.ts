@@ -321,13 +321,22 @@ describe('Undo', () => {
       return !c.building && !c.unit && !c.tree;
     })!;
     const before = prov.money;
+    const cellsBeforeUndo = g.cells;
     g.ui = { selectedKey: empty, mode: 'none', hoverKey: null };
     g.setBuildMode('buildHouse1');
     g.selectHex(empty);
     expect(g.cells[empty].building).toBe('house1');
     expect(g.getProvince(empty)!.money).toBe(before - HOUSE_COST[1]);
     expect(g.undo()).toBe(true);
+    expect(g.cells).not.toBe(cellsBeforeUndo);
     expect(g.cells[empty].building).toBeNull();
     expect(g.getProvince(empty)!.money).toBe(before);
+    // Checkpoint stays usable for a second undo after another action
+    g.ui = { selectedKey: empty, mode: 'none', hoverKey: null };
+    g.setBuildMode('buildHouse1');
+    g.selectHex(empty);
+    expect(g.cells[empty].building).toBe('house1');
+    expect(g.undo()).toBe(true);
+    expect(g.cells[empty].building).toBeNull();
   });
 });

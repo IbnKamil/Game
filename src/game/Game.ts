@@ -115,19 +115,23 @@ export class Game {
   }
 
   undo(): boolean {
-    if (!this.turnCheckpoint) return false;
+    if (!this.turnCheckpoint) {
+      this.message = 'Нечего отменять.';
+      return false;
+    }
     if (!this.currentPlayer()?.isHuman) return false;
+    // Restore from an independent clone so the turn checkpoint stays pristine
+    // and can be reused until the next human turn starts.
     this.restore(this.turnCheckpoint);
-    this.turnCheckpoint = this.snapshot();
     this.message = 'Ход отменён (к началу вашего хода).';
     this.clearSelection();
     return true;
   }
 
   restore(s: GameSnapshot): void {
-    this.cells = s.cells;
-    this.provinces = s.provinces;
-    this.players = s.players;
+    this.cells = cloneCells(s.cells);
+    this.provinces = cloneProvinces(s.provinces);
+    this.players = clonePlayers(s.players);
     this.currentPlayerId = s.currentPlayerId;
     this.turn = s.turn;
     this.winnerId = s.winnerId;

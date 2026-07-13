@@ -130,6 +130,7 @@ hud.on({
   undo: () => {
     if (!game?.currentPlayer().isHuman) return;
     game.undo();
+    renderer?.invalidateMapCache();
     render();
   },
   menu: backToMenu,
@@ -274,7 +275,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
+    if (!game.currentPlayer().isHuman) return;
     game.undo();
+    renderer?.invalidateMapCache();
     render();
   }
   if (e.key === 'Escape') {

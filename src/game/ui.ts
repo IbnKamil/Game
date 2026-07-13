@@ -34,7 +34,7 @@ export function mountHud(root: HTMLElement): {
         </div>
         <div class="status" id="statusLine"></div>
         <div class="top-actions">
-          <button type="button" data-act="undo" title="Отменить">↩</button>
+          <button type="button" data-act="undo" title="Ctrl+Z">↩ Отмена хода</button>
           <button type="button" data-act="end" class="primary">Конец хода</button>
           <button type="button" data-act="menu">Меню</button>
         </div>
