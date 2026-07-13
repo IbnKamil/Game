@@ -119,6 +119,7 @@ export const MAP_SIZE_PRESETS = [
   { id: 'medium', label: 'Средняя', radius: 9 },
   { id: 'large', label: 'Большая', radius: 12 },
   { id: 'huge', label: 'Огромная', radius: 15 },
+  { id: 'pregiant', label: 'Предгигантская', radius: 30 },
   { id: 'giant', label: 'Гигантская', radius: 45 },
 ] as const;
 

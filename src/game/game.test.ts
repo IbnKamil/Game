@@ -75,6 +75,12 @@ describe('Start menu config', () => {
     state.mapSize = 'giant';
     expect(menuToConfig(state).mapRadius).toBe(45);
   });
+
+  it('maps Предгигантская size to 2× Огромная radius', () => {
+    const state = defaultMenuState();
+    state.mapSize = 'pregiant';
+    expect(menuToConfig(state).mapRadius).toBe(30);
+  });
 });
 
 describe('Barracks houses', () => {
