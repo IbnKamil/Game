@@ -12,17 +12,19 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "desktop": "npm run build && electron .",
-    "desktop:dev": "concurrently -k \"vite --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && ELECTRON_DEV=1 electron .\"",
+    "desktop": "npm run build && npx --yes electron .",
+    "desktop:dev": "concurrently -k \"vite --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && cross-env ELECTRON_DEV=1 electron .\"",
     "desktop:dist": "npm run build && electron-builder --publish never",
     "desktop:dist:linux": "npm run build && electron-builder --linux AppImage --publish never",
     "desktop:dist:win": "npm run build && electron-builder --win zip --publish never",
-    "desktop:dist:mac": "npm run build && electron-builder --mac dmg --publish never"
+    "desktop:dist:mac": "npm run build && electron-builder --mac dmg --publish never",
+    "desktop:open": "npx --yes electron ."
   },
   "devDependencies": {
     "@fontsource/outfit": "^5.2.8",
     "@fontsource/source-serif-4": "^5.2.9",
     "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
     "electron": "^43.1.0",
     "electron-builder": "^26.15.3",
     "typescript": "~5.8.3",
