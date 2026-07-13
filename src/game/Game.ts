@@ -136,6 +136,7 @@ export class Game {
     this.message = s.message;
     this.reindexProvinces();
     this.bumpTerrain();
+    this.bumpUnits();
   }
 
   private reindexProvinces(): void {
