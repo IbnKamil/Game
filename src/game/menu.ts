@@ -8,7 +8,7 @@ import {
   type AiDifficultyId,
   type MapSizeId,
 } from './constants';
-import { drawUnitFigurine } from './sprites';
+import { drawUnitFigurine, preloadUnitSprites } from './sprites';
 import type { AiDifficulty, GameConfig, PlayerSetup } from './types';
 
 export interface MenuState {
@@ -240,11 +240,15 @@ function toColorInput(color: string): string {
 
 function paintPreviews(root: HTMLElement): void {
   const color = '#2f9e44';
-  for (const rank of [1, 2, 3, 4] as const) {
-    const canvas = root.querySelector<HTMLCanvasElement>(`[data-preview="unit${rank}"]`);
-    if (!canvas) continue;
-    const ctx = canvas.getContext('2d')!;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawUnitFigurine(ctx, canvas.width / 2, canvas.height / 2 + 8, rank, false, color);
-  }
+  const paint = (): void => {
+    for (const rank of [1, 2, 3, 4] as const) {
+      const canvas = root.querySelector<HTMLCanvasElement>(`[data-preview="unit${rank}"]`);
+      if (!canvas) continue;
+      const ctx = canvas.getContext('2d')!;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawUnitFigurine(ctx, canvas.width / 2, canvas.height / 2 + 8, rank, false, color);
+    }
+  };
+  paint();
+  preloadUnitSprites(paint);
 }

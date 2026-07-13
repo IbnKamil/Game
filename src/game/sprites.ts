@@ -233,7 +233,7 @@ export function drawUnitLod(
       ctx.fillRect(x + dx - 1, y + 2, 2, 4);
     }
     if (rank === 3) {
-      isoBox(ctx, x, y + 6, 10, 5, 3, '#1c1f24');
+      isoBox(ctx, x, y + 6, 10, 5, 3, '#868e96');
       isoBox(ctx, x + 2, y + 3, 4, 2, 2.5, teamColor);
     }
   }
@@ -259,13 +259,13 @@ function offsetsForCount(count: number): { dx: number; dy: number }[] {
       { dx: 12, dy: 4.5 },
     ];
   }
-  // 10 soldiers — two ranks of five
+  // 10 soldiers — two ranks of five (spacing for full militia-sized figures)
   const out: { dx: number; dy: number }[] = [];
   for (let row = 0; row < 2; row++) {
     for (let col = 0; col < 5; col++) {
       out.push({
-        dx: -14 + col * 7 + (row === 1 ? 1.5 : 0),
-        dy: -4 + row * 8,
+        dx: -16 + col * 8 + (row === 1 ? 2 : 0),
+        dy: -5 + row * 9,
       });
     }
   }
@@ -302,16 +302,9 @@ function drawSoldierSquad(
   teamColor: string,
   compact: boolean,
 ): void {
-  const offs = offsetsForCount(10).sort((a, b) => a.dy - b.dy);
-  const s = compact ? 0.38 : 0.48;
-  for (const o of offs) {
-    ctx.save();
-    ctx.translate(x + o.dx * 0.85, y + o.dy * 0.85);
-    ctx.scale(s, s);
-    if (compact) drawSoldierSimple(ctx, 0, 0, teamColor);
-    else drawSoldier(ctx, 0, 0, teamColor);
-    ctx.restore();
-  }
+  // Same figure scale as militia (drawGroup 0.85)
+  const scale = compact ? 0.72 : 0.85;
+  drawGroup(ctx, x, y, 10, teamColor, compact ? drawSoldierSimple : drawSoldier, scale);
 }
 
 function drawSoldierSimple(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
@@ -344,13 +337,13 @@ function drawSpecOpsSquad(
 function drawGunTruck(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
   shadow(ctx, x, y + 8, 14, 4, 0.32);
   for (const wx of [-7, -2, 5, 10]) {
-    isoCylinder(ctx, x + wx, y + 6.5, 2.2, 1.3, 2.8, '#1a1a1a');
-    ctx.fillStyle = '#444';
+    isoCylinder(ctx, x + wx, y + 6.5, 2.2, 1.3, 2.8, '#495057');
+    ctx.fillStyle = '#adb5bd';
     ctx.beginPath();
     ctx.arc(x + wx, y + 4.2, 0.7, 0, Math.PI * 2);
     ctx.fill();
   }
-  isoBox(ctx, x + 1, y + 4, 20, 9, 3.5, '#1c1f24');
+  isoBox(ctx, x + 1, y + 4, 20, 9, 3.5, '#868e96');
   isoBox(ctx, x - 5, y + 1, 8, 8, 6, shade(teamColor, -25));
   isoBox(ctx, x - 5, y - 3.5, 7, 6, 2.5, '#74c0fc');
   ctx.fillStyle = 'rgba(116,192,252,0.35)';
@@ -359,10 +352,10 @@ function drawGunTruck(ctx: CanvasRenderingContext2D, x: number, y: number, teamC
   for (const dx of [2, 5, 8]) {
     isoBox(ctx, x + dx, y + 1, 2.8, 2.2, 1.8, '#c2a878');
   }
-  isoCylinder(ctx, x + 6, y - 0.5, 2.4, 1.4, 2.2, '#333');
-  isoBox(ctx, x + 6, y - 2, 2, 2, 3, '#222');
-  isoBox(ctx, x + 10, y - 3.5, 9, 1.6, 1.5, '#1a1a1a');
-  isoBox(ctx, x + 14, y - 4.5, 1.4, 1.4, 2, '#111');
+  isoCylinder(ctx, x + 6, y - 0.5, 2.4, 1.4, 2.2, '#6c757d');
+  isoBox(ctx, x + 6, y - 2, 2, 2, 3, '#495057');
+  isoBox(ctx, x + 10, y - 3.5, 9, 1.6, 1.5, '#6c757d');
+  isoBox(ctx, x + 14, y - 4.5, 1.4, 1.4, 2, '#495057');
   isoBox(ctx, x + 4, y - 1, 2.5, 2, 2, '#3d2914');
   ctx.fillStyle = '#fff3bf';
   ctx.beginPath();
@@ -525,40 +518,40 @@ function drawAssaultRifle(ctx: CanvasRenderingContext2D, x: number, y: number): 
   isoBox(ctx, x + 0.2, y + 2.5, 1.5, 1.4, 2.4, '#1a1a1a');
 }
 
-/** Rank 3 — detailed special forces. */
+/** Rank 3 — detailed special forces (gray kit). */
 function drawSpecOps(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
   shadow(ctx, x, y + 9, 5.6, 2.2, 0.36);
 
   // Boots
-  isoBox(ctx, x - 1.7, y + 7.5, 2.9, 3, 2.5, '#0a0a0a');
-  isoBox(ctx, x + 1.7, y + 7.5, 2.9, 3, 2.5, '#0a0a0a');
+  isoBox(ctx, x - 1.7, y + 7.5, 2.9, 3, 2.5, '#495057');
+  isoBox(ctx, x + 1.7, y + 7.5, 2.9, 3, 2.5, '#495057');
   // Legs
-  isoBox(ctx, x - 1.6, y + 4.4, 2.7, 2.7, 4.4, '#141820');
-  isoBox(ctx, x + 1.6, y + 4.4, 2.7, 2.7, 4.4, '#141820');
+  isoBox(ctx, x - 1.6, y + 4.4, 2.7, 2.7, 4.4, '#6c757d');
+  isoBox(ctx, x + 1.6, y + 4.4, 2.7, 2.7, 4.4, '#6c757d');
   // Holster
-  isoBox(ctx, x + 2.8, y + 4.8, 1.6, 1.5, 2.8, '#0d0d0d');
+  isoBox(ctx, x + 2.8, y + 4.8, 1.6, 1.5, 2.8, '#495057');
   // Torso armor
-  isoBox(ctx, x, y + 0.4, 7.5, 5.3, 8.2, '#1c1f24');
+  isoBox(ctx, x, y + 0.4, 7.5, 5.3, 8.2, '#868e96');
   // Team ID stripe
   isoBox(ctx, x, y + 2.2, 7.7, 5.4, 2.1, teamColor);
   // Pouches row
   for (const dx of [-2.6, -0.9, 0.9, 2.6]) {
-    isoBox(ctx, x + dx, y + 0.8, 1.5, 1.5, 2.3, '#0a0a0a');
+    isoBox(ctx, x + dx, y + 0.8, 1.5, 1.5, 2.3, '#495057');
   }
   // Shoulder pads
-  isoBox(ctx, x - 4.3, y - 3.5, 2.6, 2.4, 2.2, '#111');
-  isoBox(ctx, x + 4.3, y - 3.5, 2.6, 2.4, 2.2, '#111');
+  isoBox(ctx, x - 4.3, y - 3.5, 2.6, 2.4, 2.2, '#adb5bd');
+  isoBox(ctx, x + 4.3, y - 3.5, 2.6, 2.4, 2.2, '#adb5bd');
   // Arms
-  isoBox(ctx, x - 4.3, y - 0.8, 2.4, 2.3, 4.8, '#1c1f24');
-  isoBox(ctx, x + 4.3, y - 0.5, 2.4, 2.3, 4.4, '#1c1f24');
+  isoBox(ctx, x - 4.3, y - 0.8, 2.4, 2.3, 4.8, '#868e96');
+  isoBox(ctx, x + 4.3, y - 0.5, 2.4, 2.3, 4.4, '#868e96');
   // Gloves
-  isoBox(ctx, x - 4.3, y + 3.6, 2.3, 2.2, 1.7, '#0a0a0a');
-  isoBox(ctx, x + 5, y + 3.4, 2.3, 2.2, 1.7, '#0a0a0a');
+  isoBox(ctx, x - 4.3, y + 3.6, 2.3, 2.2, 1.7, '#495057');
+  isoBox(ctx, x + 5, y + 3.4, 2.3, 2.2, 1.7, '#495057');
   // Balaclava head
-  isoCylinder(ctx, x, y - 7.4, 2.9, 1.7, 3.8, '#0d0d0d');
+  isoCylinder(ctx, x, y - 7.4, 2.9, 1.7, 3.8, '#6c757d');
   // NVG dual tubes
-  isoBox(ctx, x - 1.3, y - 10.2, 2.2, 2.2, 2.6, '#222');
-  isoBox(ctx, x + 1.3, y - 10.2, 2.2, 2.2, 2.6, '#222');
+  isoBox(ctx, x - 1.3, y - 10.2, 2.2, 2.2, 2.6, '#495057');
+  isoBox(ctx, x + 1.3, y - 10.2, 2.2, 2.2, 2.6, '#495057');
   const visor = ctx.createLinearGradient(x - 2.5, y - 9, x + 2.5, y - 7.5);
   visor.addColorStop(0, '#74c0fc');
   visor.addColorStop(0.5, '#1c7ed6');
@@ -573,20 +566,20 @@ function drawSpecOps(ctx: CanvasRenderingContext2D, x: number, y: number, teamCo
   ctx.ellipse(x, y - 8.6, 3.2, 1.3, 0, 0, Math.PI * 2);
   ctx.fill();
   // Headset
-  isoBox(ctx, x - 3.1, y - 8.8, 1.3, 1.5, 2.2, '#111');
-  drawLine(ctx, x - 3.1, y - 7.5, x - 1.5, y - 6.2, '#222', 1);
+  isoBox(ctx, x - 3.1, y - 8.8, 1.3, 1.5, 2.2, '#495057');
+  drawLine(ctx, x - 3.1, y - 7.5, x - 1.5, y - 6.2, '#6c757d', 1);
 
   drawSuppressedSMG(ctx, x + 4.2, y - 0.2);
 }
 
 function drawSuppressedSMG(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  isoBox(ctx, x - 1.5, y + 1, 2.8, 1.4, 1.5, '#1a1a1a');
-  isoBox(ctx, x + 2.2, y + 0.3, 5.5, 1.6, 1.9, '#2b2b2b');
-  isoBox(ctx, x + 1.5, y + 2.8, 1.5, 1.3, 2.6, '#111');
-  isoBox(ctx, x + 6.5, y + 0.1, 3.5, 1.3, 1.4, '#333');
+  isoBox(ctx, x - 1.5, y + 1, 2.8, 1.4, 1.5, '#495057');
+  isoBox(ctx, x + 2.2, y + 0.3, 5.5, 1.6, 1.9, '#6c757d');
+  isoBox(ctx, x + 1.5, y + 2.8, 1.5, 1.3, 2.6, '#495057');
+  isoBox(ctx, x + 6.5, y + 0.1, 3.5, 1.3, 1.4, '#adb5bd');
   // Suppressor
-  isoCylinder(ctx, x + 10.5, y - 0.3, 1.1, 0.7, 4.5, '#1a1a1a');
-  isoBox(ctx, x + 3, y - 1.6, 2.4, 1.3, 1.4, '#222');
+  isoCylinder(ctx, x + 10.5, y - 0.3, 1.1, 0.7, 4.5, '#6c757d');
+  isoBox(ctx, x + 3, y - 1.6, 2.4, 1.3, 1.4, '#495057');
   // Laser
   ctx.fillStyle = '#fa5252';
   ctx.beginPath();
@@ -594,119 +587,57 @@ function drawSuppressedSMG(ctx: CanvasRenderingContext2D, x: number, y: number):
   ctx.fill();
 }
 
-/** Rank 4 — realistic main battle tank. */
+const T90_SRC = '/t90-tank.png';
+let t90Image: HTMLImageElement | null = null;
+let t90LoadFailed = false;
+const t90ReadyListeners: Array<() => void> = [];
+
+function notifyT90Ready(): void {
+  const listeners = t90ReadyListeners.splice(0);
+  for (const fn of listeners) fn();
+}
+
+function getT90Image(): HTMLImageElement | null {
+  if (t90LoadFailed) return null;
+  if (typeof Image === 'undefined') return null;
+  if (!t90Image) {
+    t90Image = new Image();
+    t90Image.decoding = 'async';
+    t90Image.onload = () => notifyT90Ready();
+    t90Image.onerror = () => {
+      t90LoadFailed = true;
+    };
+    t90Image.src = T90_SRC;
+  }
+  if (t90Image.complete && t90Image.naturalWidth > 0) return t90Image;
+  return null;
+}
+
+/** Start loading unit photo sprites; `onReady` fires when T-90 is available. */
+export function preloadUnitSprites(onReady?: () => void): void {
+  if (onReady) {
+    if (getT90Image()) onReady();
+    else t90ReadyListeners.push(onReady);
+  } else {
+    getT90Image();
+  }
+}
+
+/** Rank 4 — T-90 main battle tank (photo sprite). */
 function drawTank(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
-  shadow(ctx, x, y + 9, 17, 5.5, 0.4);
-  const hull = teamColor;
-  const dark = shade(teamColor, -35);
-  const mid = shade(teamColor, -15);
-  const light = shade(teamColor, 25);
-
-  // Tracks + road wheels (6 per side)
-  for (const side of [-1, 1] as const) {
-    const sx = x + side * 9.2;
-    isoBox(ctx, sx, y + 6.5, 7.5, 12, 4.5, '#0d0d0d');
-    isoBox(ctx, sx, y + 3, 7.8, 12.2, 1.6, '#222');
-    // Drive sprocket (rear) + idler (front)
-    isoCylinder(ctx, sx + side * 0.2 - 4.2, y + 5.5, 2.3, 1.4, 3.2, '#2b2b2b');
-    isoCylinder(ctx, sx + side * 0.2 + 4.2, y + 5.8, 1.9, 1.2, 2.8, '#2b2b2b');
-    for (let i = 0; i < 6; i++) {
-      const wx = sx - 3.6 + i * 1.45;
-      isoCylinder(ctx, wx, y + 6.8, 1.25, 0.8, 2.4, '#333');
-      ctx.fillStyle = '#111';
-      ctx.beginPath();
-      ctx.arc(wx, y + 4.8, 0.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Track cleats
-    for (let i = 0; i < 8; i++) {
-      ctx.fillStyle = i % 2 ? '#151515' : '#2a2a2a';
-      ctx.fillRect(sx - 4 + i * 1.05, y + 8.2, 0.9, 1.5);
-    }
+  shadow(ctx, x, y + 10, 16, 5, 0.38);
+  const img = getT90Image();
+  if (img) {
+    const size = 44;
+    ctx.drawImage(img, x - size / 2, y - size / 2 - 3, size, size);
+    // Team marking stripe on hull
+    isoBox(ctx, x - 5, y + 7, 10, 3.2, 1.6, teamColor);
+  } else {
+    // Fallback silhouette until image loads
+    isoBox(ctx, x, y + 3, 22, 12, 6, shade(teamColor, -20));
+    isoBox(ctx, x, y - 2, 12, 9, 6, teamColor);
+    isoBox(ctx, x + 10, y - 4, 14, 2.2, 2, '#868e96');
   }
-
-  // Lower hull / side skirts
-  isoBox(ctx, x, y + 4, 22, 14, 5, dark);
-  isoBox(ctx, x - 10, y + 3, 3.2, 12, 4, mid);
-  isoBox(ctx, x + 10, y + 3, 3.2, 12, 4, mid);
-
-  // Angled glacis plate (front)
-  ctx.fillStyle = light;
-  ctx.beginPath();
-  ctx.moveTo(x - 10, y + 1);
-  ctx.lineTo(x - 6, y - 5);
-  ctx.lineTo(x + 8, y - 5);
-  ctx.lineTo(x + 11, y + 1);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = mid;
-  ctx.beginPath();
-  ctx.moveTo(x + 11, y + 1);
-  ctx.lineTo(x + 8, y - 5);
-  ctx.lineTo(x + 8, y + 2);
-  ctx.closePath();
-  ctx.fill();
-
-  // Upper hull deck
-  isoBox(ctx, x, y + 0.5, 18, 12, 5.5, hull);
-  // Engine deck vents
-  for (let i = 0; i < 5; i++) {
-    isoBox(ctx, x - 6 + i * 1.5, y - 3.5, 1.2, 3.5, 0.7, dark);
-  }
-  // Exhaust smoke
-  isoCylinder(ctx, x - 8, y - 2.5, 1.4, 0.85, 3.8, '#1a1a1a');
-  ctx.fillStyle = 'rgba(90,90,90,0.3)';
-  for (let i = 0; i < 3; i++) {
-    ctx.beginPath();
-    ctx.ellipse(x - 8 + i * 0.8, y - 8 - i * 2, 2 + i * 0.6, 1.1, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Turret (rounded look via stacked boxes)
-  isoBox(ctx, x - 0.5, y - 5, 12, 10, 7, mid);
-  isoBox(ctx, x - 0.5, y - 11, 10, 8.5, 2.8, light);
-  // ERA / applique armor tiles
-  for (const dx of [-4.5, -1.5, 1.5, 4.5]) {
-    isoBox(ctx, x + dx, y - 7, 2.6, 2.2, 1.8, shade(teamColor, 8));
-    drawLine(ctx, x + dx - 0.8, y - 8, x + dx + 0.8, y - 7.2, dark, 0.5);
-  }
-  // Commander cupola + hatch
-  isoCylinder(ctx, x - 3, y - 13, 2.6, 1.5, 3.2, '#1a1a1a');
-  isoBox(ctx, x - 3, y - 15.5, 2.4, 2.2, 1.4, '#111');
-  // Remote MG
-  isoBox(ctx, x + 1.2, y - 14.5, 5.5, 1.2, 1.1, '#222');
-  isoCylinder(ctx, x + 5, y - 14.8, 0.55, 0.35, 3.5, '#1a1a1a');
-  // Gun mantlet
-  isoBox(ctx, x + 6.5, y - 7.5, 5, 4, 4, dark);
-  // Main gun with thermal sleeve rings
-  isoCylinder(ctx, x + 14, y - 8, 1.5, 0.95, 14, '#1a1a1a');
-  for (const gx of [11, 14, 17, 20]) {
-    isoBox(ctx, x + gx, y - 7.2, 1.8, 2.2, 1.2, '#2b2b2b');
-  }
-  // Muzzle reference / bore evacuator
-  isoCylinder(ctx, x + 18, y - 8, 1.9, 1.15, 2.4, '#333');
-  isoBox(ctx, x + 22.5, y - 8.6, 2.8, 2.4, 2.2, '#111');
-  // Headlights + IR
-  ctx.fillStyle = '#fff3bf';
-  ctx.beginPath();
-  ctx.arc(x - 8, y - 1, 1.35, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#fa5252';
-  ctx.beginPath();
-  ctx.arc(x + 7.5, y - 1, 0.9, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,243,191,0.22)';
-  ctx.beginPath();
-  ctx.ellipse(x - 8, y - 1, 2.6, 1.6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Side number / marking
-  ctx.fillStyle = '#fff';
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx.lineWidth = 2;
-  ctx.font = 'bold 9px Outfit, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.strokeText('04', x + 5, y + 1);
-  ctx.fillText('04', x + 5, y + 1);
 }
 
 export function drawBuildingFigurine(

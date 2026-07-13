@@ -3,6 +3,7 @@ import { runAiTurn } from './game/ai';
 import { Game } from './game/Game';
 import { defaultMenuState, mountMenu } from './game/menu';
 import { Renderer } from './game/renderer';
+import { preloadUnitSprites } from './game/sprites';
 import type { GameConfig, SelectionMode } from './game/types';
 import { cellKey } from './game/types';
 import { mountHud } from './game/ui';
@@ -34,6 +35,7 @@ function startGame(config: GameConfig): void {
   renderer.resize();
   renderer.centerOnMap(game);
   render();
+  preloadUnitSprites(() => render());
   scheduleAi();
 }
 
