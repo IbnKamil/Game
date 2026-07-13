@@ -291,7 +291,7 @@ export function drawUnitLod(
 
 
 type UnitSpriteId = 'militia' | 'soldier' | 'specops' | 'guntruck' | 't90';
-type DefenseSpriteId = 'firepoint' | 'defenseLine';
+type DefenseSpriteId = 'firepoint' | 'firepointSoldier' | 'defenseLine';
 
 const UNIT_SPRITE_SRC: Record<UnitSpriteId, string> = {
   militia: '/militia.png',
@@ -303,6 +303,7 @@ const UNIT_SPRITE_SRC: Record<UnitSpriteId, string> = {
 
 const DEFENSE_SPRITE_SRC: Record<DefenseSpriteId, string> = {
   firepoint: '/firepoint.png',
+  firepointSoldier: '/firepoint-soldier.png',
   defenseLine: '/defense-line.png',
 };
 
@@ -321,6 +322,7 @@ const spriteState: Record<UnitSpriteId, SpriteState> = {
 
 const defenseSpriteState: Record<DefenseSpriteId, SpriteState> = {
   firepoint: { img: null, failed: false },
+  firepointSoldier: { img: null, failed: false },
   defenseLine: { img: null, failed: false },
 };
 
@@ -474,7 +476,7 @@ export function drawBuildingFigurine(
   ctx.imageSmoothingQuality = 'medium';
   if (kind === 'castle') drawCapital(ctx, x, y);
   else if (kind === 'farm') drawFarm(ctx, x, y);
-  else if (kind === 'tower') drawDefensePhoto(ctx, x, y, 'firepoint', false);
+  else if (kind === 'tower') drawFirepoint(ctx, x, y);
   else if (kind === 'strongTower') drawDefensePhoto(ctx, x, y, 'defenseLine', true);
   else if (isHouseBuilding(kind)) {
     const rank = houseRankFromKind(kind)!;
@@ -669,6 +671,48 @@ function drawFarm(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   }
   drawLine(ctx, x - 12, y + 4.5, x - 10, y + 4.5, '#8b6914', 1);
   drawLine(ctx, x + 10, y + 4.5, x + 12, y + 4.5, '#8b6914', 1);
+}
+
+/** Огневая точка — 3 лежачих солдата сверху, размер как у обычных юнитов. */
+function drawFirepoint(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const unitSize = 26; // same as drawMilitia / drawSoldier
+  const img = getDefenseSprite('firepointSoldier');
+  shadow(ctx, x, y + 10, 16, 5, 0.32);
+  // Tight top-down cluster (offsets in hex-local pixels)
+  const offsets: Array<[number, number]> = [
+    [-9, -7],
+    [9, -5],
+    [0, 7],
+  ];
+  if (img) {
+    for (const [dx, dy] of offsets) {
+      ctx.drawImage(
+        img,
+        x + dx - unitSize / 2,
+        y + dy - unitSize * 0.55,
+        unitSize,
+        unitSize,
+      );
+    }
+  } else {
+    const fallback = getDefenseSprite('firepoint');
+    if (fallback) {
+      const size = 52;
+      ctx.drawImage(fallback, x - size / 2, y - size * 0.55, size, size);
+    } else {
+      drawTower(ctx, x, y, false);
+      return;
+    }
+  }
+  const prot = BUILDING_PROTECTION.tower;
+  ctx.font = 'bold 10px Outfit, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.strokeText(String(prot), x, y + 12);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(String(prot), x, y + 12);
 }
 
 function drawDefensePhoto(
