@@ -19,7 +19,7 @@ const hud = mountHud(app);
 
 let game: Game | null = null;
 let renderer: Renderer | null = null;
-let canvas: HTMLCanvasElement | null = null;
+let viewport: HTMLElement | null = null;
 let aiEpoch = 0;
 const aiTimers = new Set<number>();
 
@@ -32,11 +32,11 @@ function startGame(config: GameConfig): void {
   menu.hide();
   hud.setVisible(true);
   game = new Game(config);
-  canvas = document.querySelector<HTMLCanvasElement>('#gameCanvas');
-  if (!canvas) return;
-  renderer = new Renderer(canvas);
-  bindCanvas(canvas);
-  renderer.resize();
+  game.saveTurnCheckpoint();
+  viewport = document.querySelector('#mapViewport');
+  if (!viewport) return;
+  renderer = new Renderer(viewport);
+  bindViewport(viewport);
   renderer.centerOnMap(game);
   render();
   preloadUnitSprites(() => {
@@ -56,6 +56,11 @@ function backToMenu(): void {
 function paint(): void {
   if (!game || !renderer) return;
   renderer.draw(game);
+}
+
+function paintOverlay(): void {
+  if (!game || !renderer) return;
+  renderer.drawOverlay(game);
 }
 
 function render(): void {
@@ -134,28 +139,30 @@ hud.on({
   },
   closeSummon: () => {
     game?.clearSelection();
-    render();
+    paintOverlay();
+    hud.update(game!);
   },
   build: (mode: SelectionMode) => {
     game?.setBuildMode(mode);
-    render();
+    paintOverlay();
+    hud.update(game!);
   },
 });
 
-let canvasBound = false;
+let bound = false;
 let panning = false;
 let panButton = -1;
 let panLastX = 0;
 let panLastY = 0;
 let panMoved = false;
-let frameRaf = 0;
+let overlayRaf = 0;
 let hudRaf = 0;
 
-function schedulePaint(): void {
-  if (frameRaf) return;
-  frameRaf = window.requestAnimationFrame(() => {
-    frameRaf = 0;
-    paint();
+function scheduleOverlay(): void {
+  if (overlayRaf) return;
+  overlayRaf = window.requestAnimationFrame(() => {
+    overlayRaf = 0;
+    paintOverlay();
   });
 }
 
@@ -167,17 +174,16 @@ function scheduleHud(): void {
   });
 }
 
-function bindCanvas(c: HTMLCanvasElement): void {
-  if (canvasBound) return;
-  canvasBound = true;
+function bindViewport(vp: HTMLElement): void {
+  if (bound) return;
+  bound = true;
 
-  c.addEventListener('auxclick', (e) => {
+  vp.addEventListener('auxclick', (e) => {
     if (e.button === 1) e.preventDefault();
   });
 
-  c.addEventListener('mousedown', (e) => {
+  vp.addEventListener('mousedown', (e) => {
     if (!game || !renderer || hud.shell.hidden) return;
-    // Middle mouse OR right mouse OR Alt+left = pan
     if (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey)) {
       e.preventDefault();
       panning = true;
@@ -185,72 +191,69 @@ function bindCanvas(c: HTMLCanvasElement): void {
       panMoved = false;
       panLastX = e.clientX;
       panLastY = e.clientY;
-      c.style.cursor = 'grabbing';
+      vp.style.cursor = 'grabbing';
     }
   });
 
   window.addEventListener('mousemove', (e) => {
-    if (!panning || !renderer || !game) return;
+    if (!panning || !renderer) return;
     const dx = e.clientX - panLastX;
     const dy = e.clientY - panLastY;
-    if (dx !== 0 || dy !== 0) {
-      panMoved = true;
-      renderer.panBy(dx, dy);
-      panLastX = e.clientX;
-      panLastY = e.clientY;
-      schedulePaint();
-    }
+    if (dx === 0 && dy === 0) return;
+    panMoved = true;
+    renderer.panBy(dx, dy); // CSS only
+    panLastX = e.clientX;
+    panLastY = e.clientY;
   });
 
   window.addEventListener('mouseup', (e) => {
     if (panning && e.button === panButton) {
       panning = false;
       panButton = -1;
-      if (canvas) canvas.style.cursor = 'crosshair';
+      if (viewport) viewport.style.cursor = 'crosshair';
     }
   });
 
-  c.addEventListener('contextmenu', (e) => {
+  vp.addEventListener('contextmenu', (e) => {
     if (!hud.shell.hidden) e.preventDefault();
   });
 
-  c.addEventListener('click', (e) => {
+  vp.addEventListener('click', (e) => {
     if (!game || !renderer || !game.currentPlayer().isHuman || game.winnerId) return;
     if (panMoved) {
       panMoved = false;
       return;
     }
     if (e.altKey) return;
-    const rect = c.getBoundingClientRect();
+    const rect = vp.getBoundingClientRect();
     const { q, r } = renderer.screenToHex(e.clientX - rect.left, e.clientY - rect.top);
     const key = cellKey(q, r);
     if (!game.cells[key]) game.clearSelection();
     else game.selectHex(key);
-    paint();
+    paint(); // terrain only if revision changed; overlay always
     scheduleHud();
   });
 
-  c.addEventListener('mousemove', (e) => {
+  vp.addEventListener('mousemove', (e) => {
     if (!game || !renderer || panning) return;
-    const rect = c.getBoundingClientRect();
+    const rect = vp.getBoundingClientRect();
     const { q, r } = renderer.screenToHex(e.clientX - rect.left, e.clientY - rect.top);
     const key = cellKey(q, r);
     const next = game.cells[key] ? key : null;
     if (next !== game.ui.hoverKey) {
       game.ui.hoverKey = next;
-      schedulePaint();
+      scheduleOverlay();
     }
   });
 
-  c.addEventListener(
+  vp.addEventListener(
     'wheel',
     (e) => {
       if (!game || !renderer || hud.shell.hidden) return;
       e.preventDefault();
-      const rect = c.getBoundingClientRect();
+      const rect = vp.getBoundingClientRect();
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      renderer.zoomAt(e.clientX - rect.left, e.clientY - rect.top, factor);
-      schedulePaint();
+      renderer.zoomAt(e.clientX - rect.left, e.clientY - rect.top, factor); // CSS only
     },
     { passive: false },
   );
@@ -258,7 +261,6 @@ function bindCanvas(c: HTMLCanvasElement): void {
 
 window.addEventListener('resize', () => {
   if (!game || !renderer) return;
-  renderer.resize();
   renderer.centerOnMap(game);
   render();
 });
@@ -277,16 +279,14 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     game.clearSelection();
-    paint();
+    paintOverlay();
     scheduleHud();
   }
   if (e.key === '+' || e.key === '=') {
-    renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1.1);
-    schedulePaint();
+    renderer?.zoomAt((viewport?.clientWidth ?? 0) / 2, (viewport?.clientHeight ?? 0) / 2, 1.1);
   }
   if (e.key === '-' || e.key === '_') {
-    renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1 / 1.1);
-    schedulePaint();
+    renderer?.zoomAt((viewport?.clientWidth ?? 0) / 2, (viewport?.clientHeight ?? 0) / 2, 1 / 1.1);
   }
 });
 

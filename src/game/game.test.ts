@@ -259,10 +259,11 @@ describe('Economy', () => {
 });
 
 describe('Undo', () => {
-  it('restores money after build via fast clone', () => {
+  it('restores turn checkpoint after build', () => {
     const g = makeGame(11);
     const prov = g.provinces.find((p) => p.owner === 1)!;
     prov.money = 200;
+    g.saveTurnCheckpoint();
     const empty = prov.hexes.find((h) => {
       const c = g.cells[h];
       return !c.building && !c.unit && !c.tree;

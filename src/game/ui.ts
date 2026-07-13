@@ -40,7 +40,12 @@ export function mountHud(root: HTMLElement): {
         </div>
       </header>
       <div class="main">
-        <canvas id="gameCanvas"></canvas>
+        <div class="map-viewport" id="mapViewport">
+          <div class="map-world" id="mapWorld">
+            <canvas id="terrainCanvas"></canvas>
+            <canvas id="overlayCanvas"></canvas>
+          </div>
+        </div>
         <aside class="sidebar" id="sidebar"></aside>
       </div>
       <div class="toast" id="toast" hidden></div>

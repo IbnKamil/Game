@@ -19,12 +19,19 @@ for (let i = 0; i < 6; i++) {
 }
 
 /**
- * Renders via a cached world-space map layer (terrain/buildings/trees).
- * Pan/zoom/hover only blit the cache + lightweight unit/highlight overlays.
+ * Dual-canvas map with CSS camera.
+ * Pan/zoom updates a CSS transform only (no canvas redraw).
+ * Terrain canvas rebuilds only when terrainRevision changes.
+ * Overlay canvas redraws for units / selection / hover.
  */
 export class Renderer {
-  canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
+  viewport: HTMLElement;
+  world: HTMLElement;
+  terrain: HTMLCanvasElement;
+  overlay: HTMLCanvasElement;
+  private tctx: CanvasRenderingContext2D;
+  private octx: CanvasRenderingContext2D;
+
   offsetX = 0;
   offsetY = 0;
   scale = 1;
@@ -38,44 +45,43 @@ export class Renderer {
   private posY = new Float32Array(0);
   private ownerColors = new Map<number, string>();
 
-  private mapCache: HTMLCanvasElement | null = null;
-  private mapCtx: CanvasRenderingContext2D | null = null;
-  private cacheOriginX = 0;
-  private cacheOriginY = 0;
+  private originX = 0;
+  private originY = 0;
   private cacheRevision = -1;
   private cacheOwnerSig = '';
-
   private moveHighlightSig = '';
   private moveHighlightKeys: string[] = [];
+  private lastOverlayKey = '';
 
-  constructor(canvas: HTMLCanvasElement) {
-    this.canvas = canvas;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    if (!ctx) throw new Error('2D context unavailable');
-    this.ctx = ctx;
+  /** @deprecated kept so old call sites compile; use terrain/overlay */
+  get canvas(): HTMLCanvasElement {
+    return this.overlay;
+  }
+
+  constructor(viewport: HTMLElement) {
+    this.viewport = viewport;
+    const world = viewport.querySelector('#mapWorld') as HTMLElement | null;
+    const terrain = viewport.querySelector('#terrainCanvas') as HTMLCanvasElement | null;
+    const overlay = viewport.querySelector('#overlayCanvas') as HTMLCanvasElement | null;
+    if (!world || !terrain || !overlay) throw new Error('Map layers missing');
+    this.world = world;
+    this.terrain = terrain;
+    this.overlay = overlay;
+    const tctx = terrain.getContext('2d', { alpha: false });
+    const octx = overlay.getContext('2d', { alpha: true });
+    if (!tctx || !octx) throw new Error('2D context unavailable');
+    this.tctx = tctx;
+    this.octx = octx;
+    this.applyCamera();
   }
 
   resize(): void {
-    const parent = this.canvas.parentElement;
-    const w = parent?.clientWidth ?? window.innerWidth;
-    const h = parent?.clientHeight ?? window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
-    const tw = Math.floor(w * dpr);
-    const th = Math.floor(h * dpr);
-    if (this.canvas.width === tw && this.canvas.height === th) {
-      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return;
-    }
-    this.canvas.width = tw;
-    this.canvas.height = th;
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.ctx.imageSmoothingEnabled = false;
+    // Viewport is CSS-sized; canvases are world-sized and set in ensureTerrain.
   }
 
   centerOnMap(game: Game): void {
     this.refreshCellCache(game);
+    this.ensureTerrain(game);
     if (this.sortedCells.length === 0) return;
     let minX = Infinity;
     let maxX = -Infinity;
@@ -87,14 +93,21 @@ export class Renderer {
       minY = Math.min(minY, this.posY[i]);
       maxY = Math.max(maxY, this.posY[i]);
     }
-    const w = this.canvas.clientWidth;
-    const h = this.canvas.clientHeight;
+    const w = this.viewport.clientWidth;
+    const h = this.viewport.clientHeight;
     this.mapCenterX = (minX + maxX) / 2;
     this.mapCenterY = (minY + maxY) / 2;
-    this.fitScale = Math.min(w / (maxX - minX + HEX_SIZE * 2.4), h / (maxY - minY + HEX_SIZE * 2.4)) * 0.94;
+    this.fitScale =
+      Math.min(w / (maxX - minX + HEX_SIZE * 2.4), h / (maxY - minY + HEX_SIZE * 2.4)) * 0.94;
     this.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.fitScale * FIT_ZOOM_BOOST));
     this.offsetX = w / 2 - this.mapCenterX * this.scale;
     this.offsetY = h / 2 - this.mapCenterY * this.scale;
+    this.applyCamera();
+  }
+
+  /** CSS-only camera update — no canvas work. */
+  applyCamera(): void {
+    this.world.style.transform = `matrix(${this.scale}, 0, 0, ${this.scale}, ${this.offsetX}, ${this.offsetY})`;
   }
 
   zoomAt(sx: number, sy: number, factor: number): void {
@@ -103,20 +116,22 @@ export class Renderer {
     this.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.scale * factor));
     this.offsetX = sx - worldX * this.scale;
     this.offsetY = sy - worldY * this.scale;
+    this.applyCamera();
   }
 
   panBy(dx: number, dy: number): void {
     this.offsetX += dx;
     this.offsetY += dy;
+    this.applyCamera();
   }
 
   screenToHex(sx: number, sy: number): { q: number; r: number } {
     return pixelToHex((sx - this.offsetX) / this.scale, (sy - this.offsetY) / this.scale, HEX_SIZE);
   }
 
-  /** Force terrain cache rebuild (e.g. after loading sprites). */
   invalidateMapCache(): void {
     this.cacheRevision = -1;
+    this.lastOverlayKey = '';
   }
 
   private refreshCellCache(game: Game): void {
@@ -144,10 +159,10 @@ export class Renderer {
     this.cacheRevision = -1;
   }
 
-  private ensureMapCache(game: Game): void {
+  private ensureTerrain(game: Game): void {
     this.refreshCellCache(game);
     this.refreshOwnerColors(game);
-    if (this.cacheRevision === game.terrainRevision && this.mapCache && this.mapCtx) return;
+    if (this.cacheRevision === game.terrainRevision && this.terrain.width > 0) return;
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -161,120 +176,102 @@ export class Renderer {
     }
     if (!Number.isFinite(minX)) return;
 
-    this.cacheOriginX = minX - CACHE_PAD;
-    this.cacheOriginY = minY - CACHE_PAD;
-    const width = Math.ceil(maxX - minX + CACHE_PAD * 2);
-    const height = Math.ceil(maxY - minY + CACHE_PAD * 2);
+    this.originX = minX - CACHE_PAD;
+    this.originY = minY - CACHE_PAD;
+    const width = Math.max(1, Math.ceil(maxX - minX + CACHE_PAD * 2));
+    const height = Math.max(1, Math.ceil(maxY - minY + CACHE_PAD * 2));
 
-    if (!this.mapCache || this.mapCache.width !== width || this.mapCache.height !== height) {
-      this.mapCache = document.createElement('canvas');
-      this.mapCache.width = width;
-      this.mapCache.height = height;
-      this.mapCtx = this.mapCache.getContext('2d', { alpha: false });
+    if (this.terrain.width !== width || this.terrain.height !== height) {
+      this.terrain.width = width;
+      this.terrain.height = height;
+      this.overlay.width = width;
+      this.overlay.height = height;
     }
-    const mctx = this.mapCtx!;
-    mctx.setTransform(1, 0, 0, 1, 0, 0);
-    mctx.fillStyle = '#1a4550';
-    mctx.fillRect(0, 0, width, height);
-    mctx.imageSmoothingEnabled = false;
+    this.terrain.style.left = `${this.originX}px`;
+    this.terrain.style.top = `${this.originY}px`;
+    this.overlay.style.left = `${this.originX}px`;
+    this.overlay.style.top = `${this.originY}px`;
+
+    const ctx = this.tctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#1a4550';
+    ctx.fillRect(0, 0, width, height);
+    ctx.imageSmoothingEnabled = false;
 
     for (let i = 0; i < this.sortedCells.length; i++) {
       const cell = this.sortedCells[i];
-      const x = this.posX[i] - this.cacheOriginX;
-      const y = this.posY[i] - this.cacheOriginY;
+      const x = this.posX[i] - this.originX;
+      const y = this.posY[i] - this.originY;
       const base = cell.owner === 0 ? '#6d8072' : (this.ownerColors.get(cell.owner) ?? '#6d8072');
-
-      pathHex(mctx, x, y);
-      mctx.fillStyle = base;
-      mctx.globalAlpha = cell.owner === 0 ? 0.9 : 0.95;
-      mctx.fill();
-      mctx.globalAlpha = 1;
-      mctx.strokeStyle = 'rgba(0,0,0,0.28)';
-      mctx.lineWidth = 1;
-      mctx.stroke();
+      pathHex(ctx, x, y);
+      ctx.fillStyle = base;
+      ctx.globalAlpha = cell.owner === 0 ? 0.9 : 0.95;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
 
       if (cell.tree) {
-        mctx.fillStyle = '#6b4226';
-        mctx.fillRect(x - 1.2, y - 1, 2.4, 7);
-        mctx.fillStyle = '#2b8a3e';
-        mctx.beginPath();
-        mctx.arc(x, y - 5, 6.5, 0, Math.PI * 2);
-        mctx.fill();
+        ctx.fillStyle = '#6b4226';
+        ctx.fillRect(x - 1.2, y - 1, 2.4, 7);
+        ctx.fillStyle = '#2b8a3e';
+        ctx.beginPath();
+        ctx.arc(x, y - 5, 6.5, 0, Math.PI * 2);
+        ctx.fill();
       }
-
       if (cell.building) {
-        drawBuildingSimple(mctx, x, y, cell.building, cell.training?.turnsLeft ?? null);
+        drawBuildingSimple(ctx, x, y, cell.building, cell.training?.turnsLeft ?? null);
       }
     }
 
     this.cacheRevision = game.terrainRevision;
+    this.lastOverlayKey = '';
   }
 
+  /** Full content sync (terrain if needed + overlay). Does not touch camera. */
   draw(game: Game): void {
-    const ctx = this.ctx;
-    const w = this.canvas.clientWidth;
-    const h = this.canvas.clientHeight;
+    this.ensureTerrain(game);
+    this.drawOverlay(game, true);
+  }
 
-    this.ensureMapCache(game);
+  /** Overlay only (units/highlights). Safe to call often. */
+  drawOverlay(game: Game, force = false): void {
+    this.refreshOwnerColors(game);
+    const key = overlayStateKey(game);
+    if (!force && key === this.lastOverlayKey) return;
+    this.lastOverlayKey = key;
 
-    ctx.setTransform(
-      Math.min(window.devicePixelRatio || 1, 1.25),
-      0,
-      0,
-      Math.min(window.devicePixelRatio || 1, 1.25),
-      0,
-      0,
-    );
-    ctx.fillStyle = '#143542';
-    ctx.fillRect(0, 0, w, h);
+    const ctx = this.octx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
 
-    ctx.save();
-    ctx.translate(this.offsetX, this.offsetY);
-    ctx.scale(this.scale, this.scale);
-    ctx.imageSmoothingEnabled = this.scale < 1.1;
-
-    if (this.mapCache) {
-      ctx.drawImage(this.mapCache, this.cacheOriginX, this.cacheOriginY);
-    }
-
-    // Dynamic overlays only
     const highlights = this.computeHighlights(game);
-    const margin = HEX_SIZE * 1.8;
-    const minX = (-this.offsetX) / this.scale - margin;
-    const maxX = (w - this.offsetX) / this.scale + margin;
-    const minY = (-this.offsetY) / this.scale - margin;
-    const maxY = (h - this.offsetY) / this.scale + margin;
-
     for (let i = 0; i < this.sortedCells.length; i++) {
-      const x = this.posX[i];
-      const y = this.posY[i];
-      if (x < minX || x > maxX || y < minY || y > maxY) continue;
       const cell = this.sortedCells[i];
-      const key = cellKey(cell.q, cell.r);
+      const x = this.posX[i] - this.originX;
+      const y = this.posY[i] - this.originY;
+      const ckey = cellKey(cell.q, cell.r);
 
-      if (highlights.has(key)) {
+      if (highlights.has(ckey)) {
         pathHex(ctx, x, y);
-        ctx.fillStyle = highlights.get(key)!;
-        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = highlights.get(ckey)!;
+        ctx.globalAlpha = 0.32;
         ctx.fill();
         ctx.globalAlpha = 1;
       }
-
-      if (game.ui.selectedKey === key) {
+      if (game.ui.selectedKey === ckey) {
         pathHex(ctx, x, y);
         ctx.strokeStyle = '#fff6c2';
         ctx.lineWidth = 2.5;
         ctx.stroke();
       }
-
       if (cell.unit) {
         const team = this.ownerColors.get(cell.unit.owner) ?? '#212529';
         const uy = cell.building ? y + 10 : y + 3;
         drawUnitLod(ctx, x, uy, cell.unit.rank as UnitRank, cell.unit.moved, team);
       }
     }
-
-    ctx.restore();
   }
 
   private computeHighlights(game: Game): Map<string, string> {
@@ -294,6 +291,10 @@ export class Renderer {
     if (game.ui.hoverKey) map.set(game.ui.hoverKey, '#a5d8ff');
     return map;
   }
+}
+
+function overlayStateKey(game: Game): string {
+  return `${game.ui.mode}|${game.ui.selectedKey}|${game.ui.hoverKey}|${game.terrainRevision}|${game.unitsRevision}`;
 }
 
 function pathHex(ctx: CanvasRenderingContext2D, x: number, y: number): void {
@@ -327,7 +328,6 @@ function drawBuildingSimple(
     ctx.fillRect(x - 12, y - 18, 8, 10);
     ctx.fillRect(x + 4, y - 18, 8, 10);
   } else {
-    // houses / barracks
     ctx.fillStyle = '#ffe8cc';
     ctx.fillRect(x - 8, y - 6, 16, 12);
     ctx.fillStyle = '#e8590c';

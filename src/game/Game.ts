@@ -57,16 +57,22 @@ export class Game {
   ui: UiState = { selectedKey: null, mode: 'none', hoverKey: null };
   private rng: () => number;
   readonly config: GameConfig;
-  private undoStack: GameSnapshot[] = [];
+  private turnCheckpoint: GameSnapshot | null = null;
   private batchDepth = 0;
   private provincesDirty = false;
   /** O(1) hex → province lookup; rebuilt with provinces. */
   private provinceByHex = new Map<string, Province>();
   /** Bumped when terrain/buildings/owners change (not on unit-only moves). */
   terrainRevision = 0;
+  /** Bumped when units move / spawn (overlay only). */
+  unitsRevision = 0;
 
   bumpTerrain(): void {
     this.terrainRevision += 1;
+  }
+
+  bumpUnits(): void {
+    this.unitsRevision += 1;
   }
 
   constructor(config: GameConfig) {
@@ -96,17 +102,24 @@ export class Game {
   }
 
   pushUndo(): void {
-    // Skip during AI turns — cloning the full map freezes the UI
-    if (!this.currentPlayer()?.isHuman) return;
-    this.undoStack.push(this.snapshot());
-    if (this.undoStack.length > 8) this.undoStack.shift();
+    // Per-action deep clones freeze the UI. Undo restores the turn checkpoint instead.
+  }
+
+  /** Snapshot at the start of a human turn for one-click undo of the whole turn. */
+  saveTurnCheckpoint(): void {
+    if (!this.currentPlayer()?.isHuman) {
+      this.turnCheckpoint = null;
+      return;
+    }
+    this.turnCheckpoint = this.snapshot();
   }
 
   undo(): boolean {
-    const prev = this.undoStack.pop();
-    if (!prev) return false;
-    this.restore(prev);
-    this.message = 'Ход отменён.';
+    if (!this.turnCheckpoint) return false;
+    if (!this.currentPlayer()?.isHuman) return false;
+    this.restore(this.turnCheckpoint);
+    this.turnCheckpoint = this.snapshot();
+    this.message = 'Ход отменён (к началу вашего хода).';
     this.clearSelection();
     return true;
   }
@@ -423,6 +436,7 @@ export class Game {
       }
       from.unit = null;
       to.unit = { ...unit, moved: true };
+      this.bumpUnits();
       this.ui = { selectedKey: toKey, mode: 'none', hoverKey: this.ui.hoverKey };
       return;
     }
@@ -453,6 +467,7 @@ export class Game {
 
     this.refreshProvinces();
     this.bumpTerrain();
+    this.bumpUnits();
     if (this.batchDepth === 0) this.checkWinner();
     this.ui = { selectedKey: toKey, mode: 'none', hoverKey: this.ui.hoverKey };
     this.message = 'Территория захвачена!';
@@ -484,6 +499,7 @@ export class Game {
         rank,
         moved: true, // cannot move on spawn turn
       };
+      this.bumpUnits();
       if (this.players.find((p) => p.id === owner)?.isHuman) {
         this.message = `${UNIT_LABEL[rank]} появились возле «${RECRUIT_LABEL[rank]}»!`;
       }
@@ -536,14 +552,17 @@ export class Game {
       mine,
     );
     this.refreshProvinces();
+    this.bumpUnits();
     this.checkWinner();
 
     const player = this.currentPlayer();
     if (player.isHuman) {
+      this.saveTurnCheckpoint();
       this.message =
         msgs[0] ??
         `Ход ${this.turn}. Ваш ход — стройте домики и вызывайте юнитов.`;
     } else {
+      this.turnCheckpoint = null;
       this.message = `Ход ${this.turn}. Ходит ${player.name}…`;
     }
   }
