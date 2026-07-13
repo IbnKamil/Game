@@ -1,6 +1,7 @@
 import { cellKey, type GameConfig, type HexCell, type Player } from './types';
 import { PLAYER_COLORS, defaultPlayerSetup } from './constants';
 import { hexDistance, hexNeighbors } from './hex';
+import { hexElevation } from './topo';
 
 /** Simple seeded PRNG (mulberry32). */
 export function createRng(seed: number): () => number {
@@ -40,13 +41,15 @@ export function generateMap(config: GameConfig): {
         tree: false,
         palm: false,
         training: null,
+        elevation: hexElevation(q, r, config.seed),
       };
     }
   }
 
-  // Scatter trees
+  // Scatter trees — prefer mid elevations (not peaks / not sinks)
   for (const cell of Object.values(cells)) {
-    if (rng() < 0.08) {
+    const treeChance = 0.05 + (cell.elevation > 0.25 && cell.elevation < 0.75 ? 0.06 : 0);
+    if (rng() < treeChance) {
       cell.tree = true;
       if (rng() < 0.35) cell.palm = true;
     }

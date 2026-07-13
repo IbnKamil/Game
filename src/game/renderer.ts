@@ -1,6 +1,7 @@
 import type { Game } from './Game';
-import { hexToPixel, pixelToHex } from './hex';
+import { HEX_DIRS, hexToPixel, pixelToHex } from './hex';
 import { drawBuildingFigurine, drawUnitFigurine } from './sprites';
+import { elevationBand, shadeRgbHex, topoWithOwner } from './topo';
 import { cellKey, type HexCell, type UnitRank } from './types';
 
 export const HEX_SIZE = 48;
@@ -9,6 +10,7 @@ const MAX_SCALE = 3.2;
 const FIT_ZOOM_BOOST = 1.5;
 const HEX_R = HEX_SIZE - 0.8;
 const CACHE_PAD = HEX_SIZE * 2;
+const TOPO_BANDS = 8;
 
 const HEX_OX: number[] = [];
 const HEX_OY: number[] = [];
@@ -205,24 +207,123 @@ export class Renderer {
 
     const ctx = this.tctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#1a4550';
+    ctx.fillStyle = '#1a3a42';
     ctx.fillRect(0, 0, width, height);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'medium';
 
+    // Pass 1: topographic fill + owner tint
     for (let i = 0; i < this.sortedCells.length; i++) {
       const cell = this.sortedCells[i];
       const x = this.posX[i] - this.originX;
       const y = this.posY[i] - this.originY;
-      const base = cell.owner === 0 ? '#6d8072' : (this.ownerColors.get(cell.owner) ?? '#6d8072');
+      const elev = cell.elevation ?? 0.45;
+      const ownerCol =
+        cell.owner === 0 ? null : (this.ownerColors.get(cell.owner) ?? null);
+      const fill = topoWithOwner(elev, ownerCol, cell.owner !== 0);
+
       pathHex(ctx, x, y);
-      ctx.fillStyle = base;
-      ctx.globalAlpha = cell.owner === 0 ? 0.9 : 0.95;
-      ctx.fill();
+      // Soft relief shading inside the hex
+      const grad = ctx.createRadialGradient(x - 6, y - 8, 2, x, y, HEX_R * 1.05);
+      grad.addColorStop(0, shadeRgbHex(fill, 18));
+      grad.addColorStop(0.55, fill);
+      grad.addColorStop(1, shadeRgbHex(fill, -22));
+      ctx.fillStyle = grad;
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+      ctx.fill();
+
+      // Fine topo hatch (subtle)
+      ctx.save();
+      pathHex(ctx, x, y);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(60, 48, 32, 0.07)';
       ctx.lineWidth = 1;
+      const band = elevationBand(elev, TOPO_BANDS);
+      const step = 5 + (band % 3);
+      for (let hx = x - HEX_R; hx < x + HEX_R; hx += step) {
+        ctx.beginPath();
+        ctx.moveTo(hx, y - HEX_R);
+        ctx.lineTo(hx + HEX_R * 0.35, y + HEX_R);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      ctx.strokeStyle = 'rgba(20, 28, 24, 0.22)';
+      ctx.lineWidth = 1;
+      pathHex(ctx, x, y);
       ctx.stroke();
+    }
+
+    // Pass 2: contour lines between elevation bands
+    ctx.lineCap = 'round';
+    for (let i = 0; i < this.sortedCells.length; i++) {
+      const cell = this.sortedCells[i];
+      const x = this.posX[i] - this.originX;
+      const y = this.posY[i] - this.originY;
+      const band = elevationBand(cell.elevation ?? 0.45, TOPO_BANDS);
+      for (let d = 0; d < 6; d++) {
+        const n = HEX_DIRS[d]!;
+        const nk = cellKey(cell.q + n.q, cell.r + n.r);
+        const nc = game.cells[nk];
+        if (!nc) {
+          // Coastline / map edge — darker contour
+          const i0 = d;
+          const i1 = (d + 1) % 6;
+          ctx.strokeStyle = 'rgba(15, 35, 40, 0.55)';
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(x + HEX_OX[i0]!, y + HEX_OY[i0]!);
+          ctx.lineTo(x + HEX_OX[i1]!, y + HEX_OY[i1]!);
+          ctx.stroke();
+          continue;
+        }
+        // Draw each shared edge once (from the lower-band hex)
+        const nBand = elevationBand(nc.elevation ?? 0.45, TOPO_BANDS);
+        if (nBand <= band) continue;
+        const i0 = d;
+        const i1 = (d + 1) % 6;
+        const major = nBand - band >= 2;
+        ctx.strokeStyle = major ? 'rgba(72, 52, 28, 0.55)' : 'rgba(72, 52, 28, 0.32)';
+        ctx.lineWidth = major ? 1.7 : 1.1;
+        ctx.beginPath();
+        ctx.moveTo(x + HEX_OX[i0]!, y + HEX_OY[i0]!);
+        ctx.lineTo(x + HEX_OX[i1]!, y + HEX_OY[i1]!);
+        ctx.stroke();
+      }
+    }
+
+    // Pass 2b: political borders (owner changes) on top of contours
+    for (let i = 0; i < this.sortedCells.length; i++) {
+      const cell = this.sortedCells[i];
+      const x = this.posX[i] - this.originX;
+      const y = this.posY[i] - this.originY;
+      for (let d = 0; d < 6; d++) {
+        const n = HEX_DIRS[d]!;
+        const nk = cellKey(cell.q + n.q, cell.r + n.r);
+        const nc = game.cells[nk];
+        if (!nc) continue;
+        if (nc.owner === cell.owner) continue;
+        // Draw once from the lower id / lower key to avoid doubles — use owner id compare
+        if (cell.owner > nc.owner) continue;
+        const i0 = d;
+        const i1 = (d + 1) % 6;
+        ctx.strokeStyle =
+          cell.owner === 0 || nc.owner === 0
+            ? 'rgba(255, 255, 255, 0.28)'
+            : 'rgba(255, 255, 255, 0.45)';
+        ctx.lineWidth = cell.owner === 0 || nc.owner === 0 ? 1.4 : 2.1;
+        ctx.beginPath();
+        ctx.moveTo(x + HEX_OX[i0]!, y + HEX_OY[i0]!);
+        ctx.lineTo(x + HEX_OX[i1]!, y + HEX_OY[i1]!);
+        ctx.stroke();
+      }
+    }
+
+    // Pass 3: trees + buildings (above topo)
+    for (let i = 0; i < this.sortedCells.length; i++) {
+      const cell = this.sortedCells[i];
+      const x = this.posX[i] - this.originX;
+      const y = this.posY[i] - this.originY;
 
       if (cell.tree) {
         ctx.fillStyle = '#6b4226';

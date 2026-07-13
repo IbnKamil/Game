@@ -33,6 +33,15 @@ describe('Game bootstrap', () => {
       expect(provs.some((pr) => g.cells[pr.capitalKey].building === 'castle')).toBe(true);
     }
   });
+
+  it('assigns topographic elevation to every hex', () => {
+    const g = makeGame(77);
+    const elevs = Object.values(g.cells).map((c) => c.elevation);
+    expect(elevs.length).toBeGreaterThan(20);
+    expect(elevs.every((e) => e >= 0 && e <= 1)).toBe(true);
+    const uniq = new Set(elevs.map((e) => e.toFixed(3)));
+    expect(uniq.size).toBeGreaterThan(5);
+  });
 });
 
 describe('Start menu config', () => {

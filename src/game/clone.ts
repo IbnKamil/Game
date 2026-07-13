@@ -14,6 +14,7 @@ function cloneCell(cell: HexCell): HexCell {
     tree: cell.tree,
     palm: cell.palm,
     training: cell.training ? { ...cell.training } : null,
+    elevation: cell.elevation ?? 0.5,
   };
 }
 

@@ -43,6 +43,8 @@ export interface HexCell {
   palm: boolean;
   /** Active training at a house building on this hex. */
   training: TrainingQueue | null;
+  /** Topographic elevation in [0, 1] — generated with the map. */
+  elevation: number;
 }
 
 export interface Province {
