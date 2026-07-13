@@ -286,8 +286,8 @@ export class Game {
     this.ui.mode = mode;
     const labels: Partial<Record<SelectionMode, string>> = {
       buildFarm: 'ферму',
-      buildTower: 'башню',
-      buildStrongTower: 'крепкую башню',
+      buildTower: 'огневую точку',
+      buildStrongTower: 'оборонительную линию',
       buildHouse1: 'домик',
       buildHouse2: 'казарму',
       buildHouse3: 'военный штаб',

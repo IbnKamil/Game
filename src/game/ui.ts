@@ -5,6 +5,7 @@ import {
   TOWER_COST,
   UNIT_COST,
   UNIT_LABEL,
+  DEFENSE_LABEL,
   houseRankFromKind,
   isHouseBuilding,
 } from './constants';
@@ -142,10 +143,18 @@ export function mountHud(root: HTMLElement): {
         const fc = farmCost(game.cells, prov);
         html += `<h3>Постройки</h3><div class="btn-grid">`;
         html += btn('build:buildFarm', `[1] Ферма (${fc})`, prov.money >= fc);
-        html += btn('build:buildTower', `[2] Башня (${TOWER_COST})`, prov.money >= TOWER_COST);
-        html += btn(
+        html += buildIconBtn(
+          'build:buildTower',
+          `/firepoint-icon.png`,
+          `[2] ${DEFENSE_LABEL.tower}`,
+          TOWER_COST,
+          prov.money >= TOWER_COST,
+        );
+        html += buildIconBtn(
           'build:buildStrongTower',
-          `[3] Кр. башня (${STRONG_TOWER_COST})`,
+          `/defense-line-icon.png`,
+          `[3] ${DEFENSE_LABEL.strongTower}`,
+          STRONG_TOWER_COST,
           prov.money >= STRONG_TOWER_COST,
         );
         html += `</div><h3>Здания призыва</h3><div class="btn-grid">`;
@@ -266,6 +275,19 @@ export function mountHud(root: HTMLElement): {
 
 function btn(act: string, label: string, enabled: boolean): string {
   return `<button type="button" data-act="${act}" ${enabled ? '' : 'disabled'}>${label}</button>`;
+}
+
+function buildIconBtn(
+  act: string,
+  iconSrc: string,
+  label: string,
+  cost: number,
+  enabled: boolean,
+): string {
+  return `<button type="button" class="build-icon-btn" data-act="${act}" ${enabled ? '' : 'disabled'}>
+    <img src="${iconSrc}" alt="" width="28" height="28" />
+    <span>${label} (${cost})</span>
+  </button>`;
 }
 
 interface HudHandlers {

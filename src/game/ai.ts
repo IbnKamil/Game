@@ -26,6 +26,12 @@ interface AiProfile {
   aggression: number;
   preferEconomy: number;
   maxMoves: number;
+  /** Always move if any positive-scoring target exists. */
+  alwaysMove: boolean;
+  /** Prefer land grab / army over farming. */
+  expandFirst: boolean;
+  /** Target units ≈ hexes * density. */
+  armyDensity: number;
 }
 
 const PROFILES: Record<AiDifficulty, AiProfile> = {
@@ -37,6 +43,9 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
     aggression: 0.45,
     preferEconomy: 0.55,
     maxMoves: 10,
+    alwaysMove: false,
+    expandFirst: false,
+    armyDensity: 0.2,
   },
   normal: {
     mistakeChance: 0.08,
@@ -44,26 +53,35 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
     buildPasses: 2,
     reserveMoney: 6,
     aggression: 0.8,
-    preferEconomy: 0.75,
+    preferEconomy: 0.7,
     maxMoves: 18,
+    alwaysMove: false,
+    expandFirst: true,
+    armyDensity: 0.35,
   },
   hard: {
-    mistakeChance: 0.02,
-    skipMoveChance: 0.01,
+    mistakeChance: 0.01,
+    skipMoveChance: 0,
     buildPasses: 3,
-    reserveMoney: 4,
-    aggression: 0.95,
-    preferEconomy: 0.9,
-    maxMoves: 28,
+    reserveMoney: 3,
+    aggression: 1,
+    preferEconomy: 0.55,
+    maxMoves: 32,
+    alwaysMove: true,
+    expandFirst: true,
+    armyDensity: 0.45,
   },
   expert: {
     mistakeChance: 0,
     skipMoveChance: 0,
-    buildPasses: 3,
-    reserveMoney: 2,
-    aggression: 1,
-    preferEconomy: 1,
-    maxMoves: 36,
+    buildPasses: 5,
+    reserveMoney: 0,
+    aggression: 1.25,
+    preferEconomy: 0.35,
+    maxMoves: 80,
+    alwaysMove: true,
+    expandFirst: true,
+    armyDensity: 0.65,
   },
 };
 
@@ -79,73 +97,89 @@ export function runAiTurn(game: Game, playerId: PlayerId): void {
 
   game.beginBatch();
   try {
+    // Expert: house/recruit pressure first, farms last
     for (let pass = 0; pass < profile.buildPasses; pass++) {
       for (const prov of [...provincesOfPlayer(game.provinces, playerId)].sort(
         (a, b) => b.hexes.length - a.hexes.length,
       )) {
-        maybeBuild(game, prov.id, profile);
+        maybeBuild(game, prov.id, profile, difficulty, pass);
       }
     }
 
+    // Summon mid-turn so money after builds still recruits when possible
     for (const prov of provincesOfPlayer(game.provinces, playerId)) {
       maybeSummon(game, prov.id, profile, difficulty);
     }
 
-    const unitKeys: string[] = [];
-    for (const prov of provincesOfPlayer(game.provinces, playerId)) {
-      for (const key of prov.hexes) {
-        const u = game.cells[key].unit;
-        if (u && u.owner === playerId && !u.moved) unitKeys.push(key);
+    // Extra farm pass for leftover cash after recruiting (non-blocking)
+    if (profile.expandFirst) {
+      for (const prov of provincesOfPlayer(game.provinces, playerId)) {
+        maybeBuildFarmOnly(game, prov.id, profile);
       }
     }
 
-    unitKeys.sort((a, b) => {
-      const ua = game.cells[a].unit!;
-      const ub = game.cells[b].unit!;
-      const rankDiff = ub.rank - ua.rank;
-      if (rankDiff !== 0) return rankDiff;
-      return (ub.count ?? 1) - (ua.count ?? 1);
-    });
-
-    let moved = 0;
-    for (const fromKey of unitKeys) {
-      if (moved >= profile.maxMoves) break;
-      const unit = game.cells[fromKey]?.unit;
-      if (!unit || unit.moved || unit.owner !== playerId) continue;
-      if (Math.random() < profile.skipMoveChance) continue;
-
-      const targets = [...game.moveTargets(fromKey)];
-      if (targets.length === 0) continue;
-
-      let best = targets[0];
-      let bestScore = scoreMove(game, playerId, fromKey, best, profile);
-      for (let i = 1; i < targets.length; i++) {
-        const s = scoreMove(game, playerId, fromKey, targets[i], profile);
-        if (s > bestScore) {
-          bestScore = s;
-          best = targets[i];
-        }
-      }
-
-      let chosen = best;
-      if (Math.random() < profile.mistakeChance && targets.length > 1) {
-        const top = [...targets]
-          .map((t) => ({ t, s: scoreMove(game, playerId, fromKey, t, profile) }))
-          .sort((a, b) => b.s - a.s)
-          .slice(0, Math.min(3, targets.length));
-        chosen = top[Math.floor(Math.random() * top.length)]!.t;
-      }
-
-      // Always take clearly good moves; otherwise expand with aggression
-      if (bestScore >= 8 || Math.random() < profile.aggression) {
-        game.moveUnitTo(fromKey, chosen);
-        moved += 1;
-      }
-    }
-
+    moveAllUnits(game, playerId, profile);
     game.clearSelection();
   } finally {
     game.endBatch();
+  }
+}
+
+function moveAllUnits(game: Game, playerId: PlayerId, profile: AiProfile): void {
+  const unitKeys: string[] = [];
+  for (const prov of provincesOfPlayer(game.provinces, playerId)) {
+    for (const key of prov.hexes) {
+      const u = game.cells[key].unit;
+      if (u && u.owner === playerId && !u.moved) unitKeys.push(key);
+    }
+  }
+
+  unitKeys.sort((a, b) => {
+    const ua = game.cells[a].unit!;
+    const ub = game.cells[b].unit!;
+    const rankDiff = ub.rank - ua.rank;
+    if (rankDiff !== 0) return rankDiff;
+    return (ub.count ?? 1) - (ua.count ?? 1);
+  });
+
+  let moved = 0;
+  for (const fromKey of unitKeys) {
+    if (moved >= profile.maxMoves) break;
+    const unit = game.cells[fromKey]?.unit;
+    if (!unit || unit.moved || unit.owner !== playerId) continue;
+    if (Math.random() < profile.skipMoveChance) continue;
+
+    const targets = [...game.moveTargets(fromKey)];
+    if (targets.length === 0) continue;
+
+    let best = targets[0]!;
+    let bestScore = scoreMove(game, playerId, fromKey, best, profile);
+    for (let i = 1; i < targets.length; i++) {
+      const s = scoreMove(game, playerId, fromKey, targets[i]!, profile);
+      if (s > bestScore) {
+        bestScore = s;
+        best = targets[i]!;
+      }
+    }
+
+    let chosen = best;
+    if (Math.random() < profile.mistakeChance && targets.length > 1) {
+      const top = [...targets]
+        .map((t) => ({ t, s: scoreMove(game, playerId, fromKey, t, profile) }))
+        .sort((a, b) => b.s - a.s)
+        .slice(0, Math.min(3, targets.length));
+      chosen = top[Math.floor(Math.random() * top.length)]!.t;
+    }
+
+    const shouldMove =
+      profile.alwaysMove
+        ? bestScore > 0
+        : bestScore >= 8 || Math.random() < profile.aggression;
+
+    if (shouldMove) {
+      game.moveUnitTo(fromKey, chosen);
+      moved += 1;
+    }
   }
 }
 
@@ -162,60 +196,80 @@ function scoreMove(
   if (!cell || !unit) return -10;
 
   let s = 0;
+  const myProv = game.getProvince(fromKey);
+  const small = !!myProv && myProv.hexes.length <= 5;
 
   if (cell.owner !== 0 && cell.owner !== playerId) {
-    s += 45 * profile.aggression;
-    if (cell.building === 'castle') s += 70;
-    else if (isHouseBuilding(cell.building)) s += 40;
-    else if (cell.building === 'farm') s += 28;
-    else if (cell.building === 'tower' || cell.building === 'strongTower') s += 18;
+    s += 55 * profile.aggression;
+    if (cell.building === 'castle') s += 90;
+    else if (isHouseBuilding(cell.building)) s += 55;
+    else if (cell.building === 'farm') s += 36;
+    else if (cell.building === 'tower' || cell.building === 'strongTower') s += 22;
     if (cell.unit) {
-      s += 12 + cell.unit.rank * 6;
-      // Prefer fights we win cleanly (higher rank / bigger stack)
-      if (unit.rank > cell.unit.rank) s += 20;
+      s += 14 + cell.unit.rank * 7;
+      if (unit.rank > cell.unit.rank) s += 28;
       else if (unit.rank === cell.unit.rank && (unit.count ?? 1) > (cell.unit.count ?? 1)) {
-        s += 10;
+        s += 16;
       }
+    } else {
+      s += 10; // empty enemy land is free expansion
     }
-    // Bonus for capturing hexes that grow a small province
-    const myProv = game.getProvince(fromKey);
-    if (myProv && myProv.hexes.length <= 4) s += 15;
+    if (small) s += 25;
+    if (profile.expandFirst) s += 12;
     return s;
   }
 
   if (cell.owner === 0) {
-    s += 18 + profile.aggression * 10;
-    // Prefer neutral hexes that touch enemies (frontline expansion)
+    s += 22 + profile.aggression * 14;
     let touchesEnemy = false;
     let touchesMine = false;
+    let enemyWeak = false;
     for (const n of hexNeighbors(cell.q, cell.r)) {
       const nc = game.cells[cellKey(n.q, n.r)];
       if (!nc) continue;
-      if (nc.owner !== 0 && nc.owner !== playerId) touchesEnemy = true;
+      if (nc.owner !== 0 && nc.owner !== playerId) {
+        touchesEnemy = true;
+        if (!nc.unit || (nc.unit.rank ?? 0) < unit.rank) enemyWeak = true;
+      }
       if (nc.owner === playerId) touchesMine = true;
     }
-    if (touchesEnemy) s += 14 * profile.aggression;
-    if (touchesMine) s += 4;
-    if (cell.tree) s += 3 * profile.preferEconomy;
+    if (touchesEnemy) s += 18 * profile.aggression;
+    if (enemyWeak) s += 10;
+    if (touchesMine) s += 6;
+    if (cell.tree) s += 2 * profile.preferEconomy;
+    if (small) s += 20;
+    if (profile.expandFirst) s += 10;
     return s;
   }
 
   // Own territory
   if (cell.unit && cell.unit.rank === unit.rank) {
-    // Merge stacks — stronger groups win same-rank fights
-    s += 6 + Math.min(8, (unit.count ?? 1) + (cell.unit.count ?? 1));
+    const total = (unit.count ?? 1) + (cell.unit.count ?? 1);
+    s += 8 + Math.min(14, total * 2);
+    // Expert merges toward the front
+    if (profile.expandFirst) {
+      for (const n of hexNeighbors(cell.q, cell.r)) {
+        const nc = game.cells[cellKey(n.q, n.r)];
+        if (nc && nc.owner !== 0 && nc.owner !== playerId) {
+          s += 12;
+          break;
+        }
+      }
+    }
   } else if (cell.tree) {
-    s += 5 * profile.preferEconomy;
+    s += 3 * profile.preferEconomy;
   } else {
     s += 1;
   }
 
-  // Step toward the front if idle
   for (const n of hexNeighbors(cell.q, cell.r)) {
     const nc = game.cells[cellKey(n.q, n.r)];
     if (nc && nc.owner !== 0 && nc.owner !== playerId) {
-      s += 8 * profile.aggression;
+      s += 12 * profile.aggression;
       break;
+    }
+    if (nc && nc.owner === 0) {
+      s += 3 * profile.aggression;
     }
   }
 
@@ -244,8 +298,10 @@ function maybeSummon(
         });
 
   const units = prov.hexes.filter((h) => game.cells[h].unit).length;
+  const training = prov.hexes.filter((h) => game.cells[h].training).length;
   const threatened = isThreatened(game, prov.hexes, prov.owner);
   const net = netIncome(game.cells, prov);
+  const armyCap = Math.max(1, Math.ceil(prov.hexes.length * profile.armyDensity));
 
   for (const key of ordered) {
     const cell = game.cells[key];
@@ -255,24 +311,26 @@ function maybeSummon(
     if (!live) continue;
 
     const cost = UNIT_COST[rank];
-    // No army yet: spend almost everything on the first recruit
     const reserve =
-      units === 0 ? Math.min(2, profile.reserveMoney) : profile.reserveMoney;
+      units + training === 0 ? 0 : profile.reserveMoney;
     if (live.money < cost + reserve) continue;
 
-    // Don't bankrupt income with expensive upkeep on easy
     if (difficulty === 'easy' && rank >= 3 && net < 6) continue;
+    // Expert: avoid starving income with too many high-rank upkeeps unless rich
+    if (difficulty === 'expert' && rank >= 3 && net < rank * 3 && units + training >= 2) {
+      continue;
+    }
 
-    const armyCap = Math.max(
-      1,
-      Math.floor(prov.hexes.length / (difficulty === 'easy' ? 5 : difficulty === 'normal' ? 3 : 2.5)),
-    );
+    const forceRecruit =
+      difficulty === 'expert' &&
+      (units + training === 0 || threatened || live.money >= cost * 2);
+
     const want =
-      units === 0 ||
+      forceRecruit ||
+      units + training === 0 ||
       threatened ||
-      units < armyCap ||
-      live.money > cost + 20 + profile.reserveMoney ||
-      (net >= UNIT_COST[1] && units < armyCap + 1);
+      units + training < armyCap ||
+      live.money > cost + 16 + profile.reserveMoney;
 
     if (!want) continue;
     if (Math.random() < profile.mistakeChance * 0.4) continue;
@@ -287,6 +345,17 @@ function isThreatened(game: Game, hexes: string[], owner: PlayerId): boolean {
     for (const n of hexNeighbors(c.q, c.r)) {
       const nc = game.cells[cellKey(n.q, n.r)];
       if (nc && nc.owner !== 0 && nc.owner !== owner) return true;
+    }
+  }
+  return false;
+}
+
+function enemyUnitAdjacent(game: Game, hexes: string[], owner: PlayerId): boolean {
+  for (const key of hexes) {
+    const c = game.cells[key];
+    for (const n of hexNeighbors(c.q, c.r)) {
+      const nc = game.cells[cellKey(n.q, n.r)];
+      if (nc && nc.owner !== 0 && nc.owner !== owner && nc.unit) return true;
     }
   }
   return false;
@@ -318,14 +387,13 @@ function pickBuildHex(
   return pool[Math.floor(Math.random() * pool.length)]!;
 }
 
-/**
- * Build priority:
- * 1) Recruitment house before farms can fill a tiny starting province.
- * 2) Upgrade / extra houses when economy allows.
- * 3) Towers only when threatened.
- * 4) Farms after at least one house exists (or on large provinces with a reserved slot).
- */
-function maybeBuild(game: Game, provinceId: number, profile: AiProfile): void {
+function maybeBuild(
+  game: Game,
+  provinceId: number,
+  profile: AiProfile,
+  difficulty: AiDifficulty,
+  pass: number,
+): void {
   const prov = game.provinces.find((p) => p.id === provinceId);
   if (!prov || prov.owner !== game.currentPlayerId) return;
 
@@ -339,34 +407,36 @@ function maybeBuild(game: Game, provinceId: number, profile: AiProfile): void {
   const farms = prov.hexes.filter((h) => game.cells[h].building === 'farm').length;
   const net = netIncome(game.cells, prov);
   const threatened = isThreatened(game, prov.hexes, prov.owner);
+  const hotFront = enemyUnitAdjacent(game, prov.hexes, prov.owner);
   const freeSlots = buildable.length;
+  const units = prov.hexes.filter((h) => game.cells[h].unit).length;
+  const training = prov.hexes.filter((h) => game.cells[h].training).length;
 
-  // --- No recruitment house yet: never seal the province with farms ---
+  // --- No recruitment house yet ---
   if (houses.length === 0) {
     const houseNeed = HOUSE_COST[1] + Math.floor(profile.reserveMoney * 0.1);
     if (prov.money >= houseNeed) {
       place(game, pickBuildHex(game, buildable, false), 'buildHouse1');
       return;
     }
-
-    // Starting 3-hex provinces (castle + 2 free): save for a house, do not farm.
-    // Also reserve the last buildable tile on any province until a house exists.
     const scarceLand = freeSlots <= 2 || prov.hexes.length <= 4;
-    if (scarceLand) return;
-
-    // Large province: one farm is OK if we still leave a house slot.
+    if (scarceLand || profile.expandFirst) return;
     if (freeSlots > 1 && net < 5) {
       const cost = farmCost(game.cells, prov);
-      if (prov.money >= cost) {
-        place(game, pickBuildHex(game, buildable, false), 'buildFarm');
-      }
+      if (prov.money >= cost) place(game, pickBuildHex(game, buildable, false), 'buildFarm');
     }
     return;
   }
 
-  // --- Have at least one house ---
+  // Early expert/hard: keep cash for militia instead of farms while under-armed
+  const underArmed = units + training < Math.max(1, Math.ceil(prov.hexes.length * profile.armyDensity));
+  if (profile.expandFirst && underArmed && pass < profile.buildPasses - 1) {
+    // Still allow house upgrades / defense below
+  } else if (!profile.expandFirst) {
+    // fall through
+  }
 
-  // Upgrade to higher houses when farms/income support them
+  // Upgrade houses
   for (const rank of [4, 3, 2] as HouseRank[]) {
     const has = houses.some((h) => houseRankFromKind(game.cells[h].building!) === rank);
     const needFarms = Math.max(0, rank - 2);
@@ -374,50 +444,86 @@ function maybeBuild(game: Game, provinceId: number, profile: AiProfile): void {
       !has &&
       farms >= needFarms &&
       net >= rank * 2 &&
-      prov.money >= HOUSE_COST[rank] + profile.reserveMoney
+      prov.money >= HOUSE_COST[rank] + profile.reserveMoney &&
+      (!profile.expandFirst || !underArmed || rank === 2)
     ) {
       place(game, pickBuildHex(game, buildable, false), `buildHouse${rank}` as SelectionMode);
       return;
     }
   }
 
-  // Extra house1 if rich and expanding
+  // Extra house when large
   if (
-    houses.length < Math.min(3, 1 + Math.floor(prov.hexes.length / 6)) &&
+    houses.length < Math.min(3, 1 + Math.floor(prov.hexes.length / 5)) &&
     freeSlots > 1 &&
-    prov.money >= HOUSE_COST[1] + 15 + profile.reserveMoney &&
-    net >= 6
+    prov.money >= HOUSE_COST[1] + 12 + profile.reserveMoney &&
+    net >= 5 &&
+    !underArmed
   ) {
     place(game, pickBuildHex(game, buildable, false), 'buildHouse1');
     return;
   }
 
-  // Defense when under pressure — keep a free slot if we still need economy space
-  if (threatened && prov.money >= TOWER_COST + profile.reserveMoney * 0.25) {
-    if (Math.random() < 0.4 + profile.aggression * 0.45) {
-      const mode: SelectionMode =
-        prov.money >= STRONG_TOWER_COST + profile.reserveMoney && profile.aggression > 0.75
-          ? 'buildStrongTower'
-          : 'buildTower';
-      place(game, pickBuildHex(game, buildable, true), mode);
-      return;
-    }
+  // Defense — expert builds when enemy units are adjacent
+  const wantTower =
+    (hotFront && profile.aggression >= 1) ||
+    (threatened && Math.random() < 0.35 + profile.aggression * 0.4);
+  if (wantTower && prov.money >= TOWER_COST + profile.reserveMoney * 0.2) {
+    const mode: SelectionMode =
+      prov.money >= STRONG_TOWER_COST + profile.reserveMoney && (hotFront || profile.aggression > 1)
+        ? 'buildStrongTower'
+        : 'buildTower';
+    place(game, pickBuildHex(game, buildable, true), mode);
+    return;
   }
 
-  // Farms after recruitment is online — don't fill the very last tile unless income is dire
-  const farmTarget = Math.max(1, Math.floor(prov.hexes.length / 3));
-  const wantFarm = farms < farmTarget || net < 4 + profile.preferEconomy * 4;
-  if (wantFarm && (freeSlots > 1 || net < 2)) {
-    const cost = farmCost(game.cells, prov);
-    if (prov.money >= cost + Math.floor(profile.reserveMoney * 0.25)) {
-      // Keep money for summoning if we have idle houses and no army
-      const idleHouse = houses.some((h) => !game.cells[h].training);
-      const units = prov.hexes.filter((h) => game.cells[h].unit).length;
-      if (idleHouse && units === 0 && prov.money < UNIT_COST[1] + cost) {
-        return;
-      }
-      place(game, pickBuildHex(game, buildable, false), 'buildFarm');
-    }
+  // Farms: delayed for expand-first AIs (handled in maybeBuildFarmOnly after summon)
+  if (!profile.expandFirst) {
+    maybeBuildFarmOnly(game, provinceId, profile);
+  } else if (difficulty !== 'expert' && pass === profile.buildPasses - 1) {
+    maybeBuildFarmOnly(game, provinceId, profile);
+  }
+}
+
+function maybeBuildFarmOnly(game: Game, provinceId: number, profile: AiProfile): void {
+  const prov = game.provinces.find((p) => p.id === provinceId);
+  if (!prov || prov.owner !== game.currentPlayerId) return;
+
+  const buildable = prov.hexes.filter((h) => {
+    const c = game.cells[h];
+    return !c.unit && !c.building;
+  });
+  if (buildable.length === 0) return;
+
+  const houses = prov.hexes.filter((h) => isHouseBuilding(game.cells[h].building));
+  if (houses.length === 0) return;
+
+  const farms = prov.hexes.filter((h) => game.cells[h].building === 'farm').length;
+  const net = netIncome(game.cells, prov);
+  const freeSlots = buildable.length;
+  const units = prov.hexes.filter((h) => game.cells[h].unit).length;
+  const idleHouse = houses.some((h) => !game.cells[h].training);
+
+  // Keep recruiting if under-armed
+  if (profile.expandFirst && idleHouse && units === 0 && prov.money >= UNIT_COST[1]) return;
+  if (
+    profile.expandFirst &&
+    idleHouse &&
+    units < Math.ceil(prov.hexes.length * profile.armyDensity) &&
+    prov.money >= UNIT_COST[1] + farmCost(game.cells, prov)
+  ) {
+    return;
+  }
+
+  const farmTarget = profile.expandFirst
+    ? Math.max(0, Math.floor(prov.hexes.length / 4))
+    : Math.max(1, Math.floor(prov.hexes.length / 3));
+  const wantFarm = farms < farmTarget || net < 3 + profile.preferEconomy * 3;
+  if (!wantFarm || (freeSlots <= 1 && net >= 2)) return;
+
+  const cost = farmCost(game.cells, prov);
+  if (prov.money >= cost + Math.floor(profile.reserveMoney * 0.2)) {
+    place(game, pickBuildHex(game, buildable, false), 'buildFarm');
   }
 }
 

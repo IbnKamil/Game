@@ -48,6 +48,12 @@ export const FARM_INCOME = 4;
 export const TOWER_COST = 15;
 export const STRONG_TOWER_COST = 35;
 
+/** Defense building display names (UI / messages). */
+export const DEFENSE_LABEL = {
+  tower: 'Огневая точка',
+  strongTower: 'Оборонительная линия',
+} as const;
+
 /** Extra barracks houses — cost scales with rank. */
 export const HOUSE_COST: Record<HouseRank, number> = {
   1: 25,
@@ -121,7 +127,7 @@ export const AI_DIFFICULTY_PRESETS = [
   { id: 'easy', label: 'Лёгкий', hint: 'Ошибки, медленное развитие' },
   { id: 'normal', label: 'Обычный', hint: 'Домики, набор, давление' },
   { id: 'hard', label: 'Сложный', hint: 'Агрессия и экономика' },
-  { id: 'expert', label: 'Эксперт', hint: 'Максимальное давление' },
+  { id: 'expert', label: 'Эксперт', hint: 'Жёсткая экспансия и давление' },
 ] as const;
 
 export type AiDifficultyId = (typeof AI_DIFFICULTY_PRESETS)[number]['id'];
