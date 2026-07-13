@@ -195,7 +195,7 @@ export function drawUnitFigurine(
   ctx.save();
   ctx.globalAlpha = moved ? 0.55 : 1;
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = opts.compact ? 'medium' : 'high';
+  ctx.imageSmoothingQuality = 'medium';
 
   if (rank === 1) drawGroup(ctx, x, y, UNIT_FIGURE_COUNT[1], teamColor, drawMilitia, 0.85);
   else if (rank === 2) drawSoldierSquad(ctx, x, y, teamColor, opts.compact === true);
@@ -480,7 +480,7 @@ export function drawBuildingFigurine(
 ): void {
   ctx.save();
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
+  ctx.imageSmoothingQuality = 'medium';
   if (kind === 'castle') drawCapital(ctx, x, y);
   else if (kind === 'farm') drawFarm(ctx, x, y);
   else if (kind === 'tower') drawTower(ctx, x, y, false);

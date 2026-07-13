@@ -257,3 +257,24 @@ describe('Economy', () => {
     }
   });
 });
+
+describe('Undo', () => {
+  it('restores money after build via fast clone', () => {
+    const g = makeGame(11);
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    prov.money = 200;
+    const empty = prov.hexes.find((h) => {
+      const c = g.cells[h];
+      return !c.building && !c.unit && !c.tree;
+    })!;
+    const before = prov.money;
+    g.ui = { selectedKey: empty, mode: 'none', hoverKey: null };
+    g.setBuildMode('buildHouse1');
+    g.selectHex(empty);
+    expect(g.cells[empty].building).toBe('house1');
+    expect(g.getProvince(empty)!.money).toBe(before - HOUSE_COST[1]);
+    expect(g.undo()).toBe(true);
+    expect(g.cells[empty].building).toBeNull();
+    expect(g.getProvince(empty)!.money).toBe(before);
+  });
+});

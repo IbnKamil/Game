@@ -23,8 +23,8 @@ import {
   resetMovedFlags,
   spreadTrees,
 } from './economy';
-import { hexDistance, hexNeighbors } from './hex';
-import { createRng, generateMap } from './mapgen';
+import { cloneCells, clonePlayers, cloneProvinces } from './clone';
+import { hexDistance, hexNeighbors } from './hex';import { createRng, generateMap } from './mapgen';
 import {
   cellKey,
   type BuildingKind,
@@ -60,6 +60,8 @@ export class Game {
   private undoStack: GameSnapshot[] = [];
   private batchDepth = 0;
   private provincesDirty = false;
+  /** O(1) hex → province lookup; rebuilt with provinces. */
+  private provinceByHex = new Map<string, Province>();
 
   constructor(config: GameConfig) {
     this.config = config;
@@ -69,14 +71,15 @@ export class Game {
     this.players = players;
     this.currentPlayerId = 1;
     this.provinces = rebuildProvinces(this.cells, [], this.nextProvinceId);
+    this.reindexProvinces();
     this.message = 'Ваш ход. Стройте домики, чтобы вызывать юнитов.';
   }
 
   snapshot(): GameSnapshot {
     return {
-      cells: structuredClone(this.cells),
-      provinces: structuredClone(this.provinces),
-      players: structuredClone(this.players),
+      cells: cloneCells(this.cells),
+      provinces: cloneProvinces(this.provinces),
+      players: clonePlayers(this.players),
       currentPlayerId: this.currentPlayerId,
       turn: this.turn,
       winnerId: this.winnerId,
@@ -87,11 +90,10 @@ export class Game {
   }
 
   pushUndo(): void {
-    // Skip during AI turns — structuredClone of the full map freezes the UI
+    // Skip during AI turns — cloning the full map freezes the UI
     if (!this.currentPlayer()?.isHuman) return;
-    // Keep undo light: fewer deep clones
     this.undoStack.push(this.snapshot());
-    if (this.undoStack.length > 12) this.undoStack.shift();
+    if (this.undoStack.length > 8) this.undoStack.shift();
   }
 
   undo(): boolean {
@@ -113,6 +115,14 @@ export class Game {
     this.nextUnitId = s.nextUnitId;
     this.nextProvinceId.value = s.nextProvinceId;
     this.message = s.message;
+    this.reindexProvinces();
+  }
+
+  private reindexProvinces(): void {
+    this.provinceByHex.clear();
+    for (const p of this.provinces) {
+      for (const h of p.hexes) this.provinceByHex.set(h, p);
+    }
   }
 
   clearSelection(): void {
@@ -124,7 +134,7 @@ export class Game {
   }
 
   getProvince(key: string): Province | undefined {
-    return provinceOfHex(this.provinces, key);
+    return this.provinceByHex.get(key) ?? provinceOfHex(this.provinces, key);
   }
 
   selectedProvince(): Province | undefined {
@@ -138,6 +148,7 @@ export class Game {
       return;
     }
     this.provinces = rebuildProvinces(this.cells, this.provinces, this.nextProvinceId);
+    this.reindexProvinces();
   }
 
   /** Batch AI/actions: defer expensive province rebuilds. */
@@ -150,6 +161,7 @@ export class Game {
     if (this.batchDepth === 0 && this.provincesDirty) {
       this.provincesDirty = false;
       this.provinces = rebuildProvinces(this.cells, this.provinces, this.nextProvinceId);
+      this.reindexProvinces();
       this.checkWinner();
     }
   }

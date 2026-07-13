@@ -40,7 +40,7 @@ function startGame(config: GameConfig): void {
   renderer.resize();
   renderer.centerOnMap(game);
   render();
-  preloadUnitSprites(() => render());
+  preloadUnitSprites(() => paint());
   scheduleAi();
 }
 
@@ -51,10 +51,16 @@ function backToMenu(): void {
   menu.show();
 }
 
-function render(): void {
+/** Canvas only — used for hover / pan / zoom. */
+function paint(): void {
   if (!game || !renderer) return;
   renderer.draw(game);
-  hud.update(game);
+}
+
+/** Canvas + sidebar — used after game actions. */
+function render(): void {
+  paint();
+  if (game) hud.update(game);
 }
 
 function stopAi(): void {
@@ -73,8 +79,17 @@ function delay(ms: number, epoch: number): Promise<boolean> {
   });
 }
 
+function yieldFrame(epoch: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const id = window.requestAnimationFrame(() => {
+      resolve(epoch === aiEpoch);
+    });
+    // Track as timeout-like cancel via epoch only
+    void id;
+  });
+}
+
 async function scheduleAi(): Promise<void> {
-  // Cancel any previous AI loop, then claim this run's epoch
   for (const id of aiTimers) window.clearTimeout(id);
   aiTimers.clear();
   const epoch = ++aiEpoch;
@@ -91,23 +106,24 @@ async function scheduleAi(): Promise<void> {
     }
 
     const diff = game.config.aiDifficulty ?? 'normal';
-    const thinkMs = diff === 'easy' ? 280 : diff === 'expert' ? 80 : 160;
+    // Tiny pause so the UI can paint "AI thinking" — not hundreds of ms
+    const thinkMs = diff === 'easy' ? 40 : diff === 'expert' ? 0 : 16;
     const playerId = game.currentPlayerId;
 
-    const still = await delay(thinkMs, epoch);
-    if (!still || !game || game.winnerId) return;
-    if (game.currentPlayerId !== playerId) continue;
+    if (thinkMs > 0) {
+      const still = await delay(thinkMs, epoch);
+      if (!still || !game || game.winnerId) return;
+      if (game.currentPlayerId !== playerId) continue;
+    }
 
     try {
       runAiTurn(game, playerId);
     } catch (err) {
       console.error('AI turn failed', err);
     }
-    // Canvas only during AI to keep UI responsive
-    if (renderer && game) renderer.draw(game);
-
-    const ok = await delay(40, epoch);
-    if (!ok || !game || game.winnerId) return;
+    paint();
+    const okFrame = await yieldFrame(epoch);
+    if (!okFrame || !game || game.winnerId) return;
     if (game.currentPlayerId !== playerId) continue;
 
     game.endTurn();
@@ -150,12 +166,26 @@ let panLastX = 0;
 let panLastY = 0;
 let panMoved = false;
 let hoverRaf = 0;
+let zoomRaf = 0;
+let pendingZoom: { sx: number; sy: number; factor: number } | null = null;
 
 function scheduleHoverDraw(): void {
   if (hoverRaf) return;
   hoverRaf = window.requestAnimationFrame(() => {
     hoverRaf = 0;
-    if (game && renderer) renderer.draw(game);
+    paint();
+  });
+}
+
+function scheduleZoomDraw(): void {
+  if (zoomRaf) return;
+  zoomRaf = window.requestAnimationFrame(() => {
+    zoomRaf = 0;
+    if (pendingZoom && renderer) {
+      renderer.zoomAt(pendingZoom.sx, pendingZoom.sy, pendingZoom.factor);
+      pendingZoom = null;
+    }
+    paint();
   });
 }
 
@@ -237,8 +267,14 @@ function bindCanvas(c: HTMLCanvasElement): void {
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
       const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      renderer.zoomAt(sx, sy, factor);
-      render();
+      if (pendingZoom) {
+        pendingZoom.factor *= factor;
+        pendingZoom.sx = sx;
+        pendingZoom.sy = sy;
+      } else {
+        pendingZoom = { sx, sy, factor };
+      }
+      scheduleZoomDraw();
     },
     { passive: false },
   );
@@ -273,11 +309,11 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === '+' || e.key === '=') {
     renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1.12);
-    render();
+    paint();
   }
   if (e.key === '-' || e.key === '_') {
     renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1 / 1.12);
-    render();
+    paint();
   }
 });
 

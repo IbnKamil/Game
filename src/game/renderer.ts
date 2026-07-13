@@ -37,7 +37,7 @@ export class Renderer {
     this.canvas.style.height = `${h}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.ctx.imageSmoothingEnabled = true;
-    this.ctx.imageSmoothingQuality = 'high';
+    this.ctx.imageSmoothingQuality = 'medium';
   }
 
   centerOnMap(game: Game): void {
@@ -93,12 +93,11 @@ export class Renderer {
     const ctx = this.ctx;
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
+    const detail = this.scale >= 1.05;
+    const useLod = this.scale < 1.15;
+    const compact = this.scale < 1.4;
 
-    const grad = ctx.createLinearGradient(0, 0, w, h);
-    grad.addColorStop(0, '#163a45');
-    grad.addColorStop(0.5, '#1f4f46');
-    grad.addColorStop(1, '#1a3f58');
-    ctx.fillStyle = grad;
+    ctx.fillStyle = '#1a4550';
     ctx.fillRect(0, 0, w, h);
 
     ctx.save();
@@ -106,58 +105,71 @@ export class Renderer {
     ctx.scale(this.scale, this.scale);
 
     const highlights = this.computeHighlights(game);
+    const colorByOwner = new Map<number, string>();
+    for (const p of game.players) colorByOwner.set(p.id, p.color);
+
+    // Viewport culling in world space
+    const margin = HEX_SIZE * 2.2;
+    const minX = (-this.offsetX) / this.scale - margin;
+    const maxX = (w - this.offsetX) / this.scale + margin;
+    const minY = (-this.offsetY) / this.scale - margin;
+    const maxY = (h - this.offsetY) / this.scale + margin;
+
     const cells = Object.values(game.cells).sort((a, b) => a.r - b.r || a.q - b.q);
 
     for (const cell of cells) {
       const { x, y } = hexToPixel(cell.q, cell.r, HEX_SIZE);
+      if (x < minX || x > maxX || y < minY || y > maxY) continue;
+
       const key = cellKey(cell.q, cell.r);
-      const owner = game.players.find((p) => p.id === cell.owner);
-      const base = owner ? owner.color : '#6d8072';
+      const base = cell.owner === 0 ? '#6d8072' : (colorByOwner.get(cell.owner) ?? '#6d8072');
       const corners = hexCorners(x, y, HEX_SIZE - 0.8);
 
-      // Soft ground shadow under hex for depth
-      ctx.save();
-      ctx.fillStyle = 'rgba(0,0,0,0.16)';
-      ctx.beginPath();
-      ctx.ellipse(x, y + HEX_SIZE * 0.55, HEX_SIZE * 0.72, HEX_SIZE * 0.28, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      if (detail) {
+        ctx.fillStyle = 'rgba(0,0,0,0.14)';
+        ctx.beginPath();
+        ctx.ellipse(x, y + HEX_SIZE * 0.55, HEX_SIZE * 0.72, HEX_SIZE * 0.28, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       ctx.beginPath();
       ctx.moveTo(corners[0].x, corners[0].y);
       for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
       ctx.closePath();
 
-      // 3D-ish hex: fill + top highlight edge
-      if (cell.owner === 0) {
-        const g = ctx.createLinearGradient(x, y - HEX_SIZE, x, y + HEX_SIZE);
-        g.addColorStop(0, '#7a8f80');
-        g.addColorStop(1, '#55695c');
-        ctx.fillStyle = g;
-        ctx.globalAlpha = 0.92;
-      } else {
+      if (detail && cell.owner !== 0) {
         const g = ctx.createLinearGradient(x - HEX_SIZE, y - HEX_SIZE, x + HEX_SIZE, y + HEX_SIZE);
         g.addColorStop(0, shadeHex(base, 28));
         g.addColorStop(0.55, base);
         g.addColorStop(1, shadeHex(base, -22));
         ctx.fillStyle = g;
         ctx.globalAlpha = 0.94;
+      } else if (detail) {
+        const g = ctx.createLinearGradient(x, y - HEX_SIZE, x, y + HEX_SIZE);
+        g.addColorStop(0, '#7a8f80');
+        g.addColorStop(1, '#55695c');
+        ctx.fillStyle = g;
+        ctx.globalAlpha = 0.92;
+      } else {
+        ctx.fillStyle = base;
+        ctx.globalAlpha = cell.owner === 0 ? 0.9 : 0.94;
       }
       ctx.fill();
       ctx.globalAlpha = 1;
 
       ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-      ctx.lineWidth = 1.35;
+      ctx.lineWidth = 1.2;
       ctx.stroke();
 
-      // Bright top edge for clarity
-      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.moveTo(corners[5].x, corners[5].y);
-      ctx.lineTo(corners[0].x, corners[0].y);
-      ctx.lineTo(corners[1].x, corners[1].y);
-      ctx.stroke();
+      if (detail) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(corners[5].x, corners[5].y);
+        ctx.lineTo(corners[0].x, corners[0].y);
+        ctx.lineTo(corners[1].x, corners[1].y);
+        ctx.stroke();
+      }
 
       if (highlights.has(key)) {
         ctx.beginPath();
@@ -189,15 +201,13 @@ export class Renderer {
       }
 
       if (cell.unit) {
-        const team = game.players.find((p) => p.id === cell.unit!.owner)?.color ?? '#212529';
+        const team = colorByOwner.get(cell.unit.owner) ?? '#212529';
         const uy = cell.building ? y + 10 : y + 3;
         const rank = cell.unit.rank as UnitRank;
-        if (this.scale < 0.7) {
+        if (useLod) {
           drawUnitLod(ctx, x, uy, rank, cell.unit.moved, team);
         } else {
-          drawUnitFigurine(ctx, x, uy, rank, cell.unit.moved, team, {
-            compact: this.scale < 1.05,
-          });
+          drawUnitFigurine(ctx, x, uy, rank, cell.unit.moved, team, { compact });
         }
       }
     }
