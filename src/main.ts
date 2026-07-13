@@ -20,7 +20,6 @@ const hud = mountHud(app);
 let game: Game | null = null;
 let renderer: Renderer | null = null;
 let canvas: HTMLCanvasElement | null = null;
-/** Cancels in-flight AI timeouts when incremented. */
 let aiEpoch = 0;
 const aiTimers = new Set<number>();
 
@@ -40,7 +39,10 @@ function startGame(config: GameConfig): void {
   renderer.resize();
   renderer.centerOnMap(game);
   render();
-  preloadUnitSprites(() => paint());
+  preloadUnitSprites(() => {
+    renderer?.invalidateMapCache();
+    paint();
+  });
   scheduleAi();
 }
 
@@ -51,13 +53,11 @@ function backToMenu(): void {
   menu.show();
 }
 
-/** Canvas only — used for hover / pan / zoom. */
 function paint(): void {
   if (!game || !renderer) return;
   renderer.draw(game);
 }
 
-/** Canvas + sidebar — used after game actions. */
 function render(): void {
   paint();
   if (game) hud.update(game);
@@ -79,21 +79,10 @@ function delay(ms: number, epoch: number): Promise<boolean> {
   });
 }
 
-function yieldFrame(epoch: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const id = window.requestAnimationFrame(() => {
-      resolve(epoch === aiEpoch);
-    });
-    // Track as timeout-like cancel via epoch only
-    void id;
-  });
-}
-
 async function scheduleAi(): Promise<void> {
   for (const id of aiTimers) window.clearTimeout(id);
   aiTimers.clear();
   const epoch = ++aiEpoch;
-
   if (!game || game.winnerId) return;
 
   while (game && !game.winnerId && epoch === aiEpoch) {
@@ -105,16 +94,10 @@ async function scheduleAi(): Promise<void> {
       continue;
     }
 
-    const diff = game.config.aiDifficulty ?? 'normal';
-    // Tiny pause so the UI can paint "AI thinking" — not hundreds of ms
-    const thinkMs = diff === 'easy' ? 40 : diff === 'expert' ? 0 : 16;
     const playerId = game.currentPlayerId;
-
-    if (thinkMs > 0) {
-      const still = await delay(thinkMs, epoch);
-      if (!still || !game || game.winnerId) return;
-      if (game.currentPlayerId !== playerId) continue;
-    }
+    const still = await delay(16, epoch);
+    if (!still || !game || game.winnerId) return;
+    if (game.currentPlayerId !== playerId) continue;
 
     try {
       runAiTurn(game, playerId);
@@ -122,10 +105,9 @@ async function scheduleAi(): Promise<void> {
       console.error('AI turn failed', err);
     }
     paint();
-    const okFrame = await yieldFrame(epoch);
-    if (!okFrame || !game || game.winnerId) return;
+    await delay(0, epoch);
+    if (!game || game.winnerId || epoch !== aiEpoch) return;
     if (game.currentPlayerId !== playerId) continue;
-
     game.endTurn();
     render();
   }
@@ -162,48 +144,26 @@ hud.on({
 
 let canvasBound = false;
 let panning = false;
+let panButton = -1;
 let panLastX = 0;
 let panLastY = 0;
 let panMoved = false;
-let hoverRaf = 0;
-let zoomRaf = 0;
-let settleTimer = 0;
-let pendingZoom: { sx: number; sy: number; factor: number } | null = null;
+let frameRaf = 0;
+let hudRaf = 0;
 
-function setFastMode(on: boolean): void {
-  if (!renderer) return;
-  if (renderer.fastMode === on) return;
-  renderer.fastMode = on;
-  renderer.resize();
-}
-
-function settleDetailedPaint(): void {
-  window.clearTimeout(settleTimer);
-  settleTimer = window.setTimeout(() => {
-    setFastMode(false);
-    paint();
-  }, 120);
-}
-
-function scheduleHoverDraw(): void {
-  if (hoverRaf) return;
-  hoverRaf = window.requestAnimationFrame(() => {
-    hoverRaf = 0;
+function schedulePaint(): void {
+  if (frameRaf) return;
+  frameRaf = window.requestAnimationFrame(() => {
+    frameRaf = 0;
     paint();
   });
 }
 
-function scheduleZoomDraw(): void {
-  setFastMode(true);
-  if (zoomRaf) return;
-  zoomRaf = window.requestAnimationFrame(() => {
-    zoomRaf = 0;
-    if (pendingZoom && renderer) {
-      renderer.zoomAt(pendingZoom.sx, pendingZoom.sy, pendingZoom.factor);
-      pendingZoom = null;
-    }
-    paint();
-    settleDetailedPaint();
+function scheduleHud(): void {
+  if (hudRaf) return;
+  hudRaf = window.requestAnimationFrame(() => {
+    hudRaf = 0;
+    if (game) hud.update(game);
   });
 }
 
@@ -217,13 +177,14 @@ function bindCanvas(c: HTMLCanvasElement): void {
 
   c.addEventListener('mousedown', (e) => {
     if (!game || !renderer || hud.shell.hidden) return;
-    if (e.button === 1) {
+    // Middle mouse OR right mouse OR Alt+left = pan
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey)) {
       e.preventDefault();
       panning = true;
+      panButton = e.button;
       panMoved = false;
       panLastX = e.clientX;
       panLastY = e.clientY;
-      setFastMode(true);
       c.style.cursor = 'grabbing';
     }
   });
@@ -237,16 +198,20 @@ function bindCanvas(c: HTMLCanvasElement): void {
       renderer.panBy(dx, dy);
       panLastX = e.clientX;
       panLastY = e.clientY;
-      scheduleHoverDraw();
+      schedulePaint();
     }
   });
 
   window.addEventListener('mouseup', (e) => {
-    if (e.button === 1 && panning) {
+    if (panning && e.button === panButton) {
       panning = false;
+      panButton = -1;
       if (canvas) canvas.style.cursor = 'crosshair';
-      settleDetailedPaint();
     }
+  });
+
+  c.addEventListener('contextmenu', (e) => {
+    if (!hud.shell.hidden) e.preventDefault();
   });
 
   c.addEventListener('click', (e) => {
@@ -255,19 +220,14 @@ function bindCanvas(c: HTMLCanvasElement): void {
       panMoved = false;
       return;
     }
+    if (e.altKey) return;
     const rect = c.getBoundingClientRect();
     const { q, r } = renderer.screenToHex(e.clientX - rect.left, e.clientY - rect.top);
     const key = cellKey(q, r);
-    if (!game.cells[key]) {
-      game.clearSelection();
-    } else {
-      game.selectHex(key);
-    }
-    // Paint first, HUD on next frame — keeps clicks snappy
+    if (!game.cells[key]) game.clearSelection();
+    else game.selectHex(key);
     paint();
-    window.requestAnimationFrame(() => {
-      if (game) hud.update(game);
-    });
+    scheduleHud();
   });
 
   c.addEventListener('mousemove', (e) => {
@@ -278,7 +238,7 @@ function bindCanvas(c: HTMLCanvasElement): void {
     const next = game.cells[key] ? key : null;
     if (next !== game.ui.hoverKey) {
       game.ui.hoverKey = next;
-      scheduleHoverDraw();
+      schedulePaint();
     }
   });
 
@@ -288,24 +248,12 @@ function bindCanvas(c: HTMLCanvasElement): void {
       if (!game || !renderer || hud.shell.hidden) return;
       e.preventDefault();
       const rect = c.getBoundingClientRect();
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      if (pendingZoom) {
-        pendingZoom.factor *= factor;
-        pendingZoom.sx = sx;
-        pendingZoom.sy = sy;
-      } else {
-        pendingZoom = { sx, sy, factor };
-      }
-      scheduleZoomDraw();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      renderer.zoomAt(e.clientX - rect.left, e.clientY - rect.top, factor);
+      schedulePaint();
     },
     { passive: false },
   );
-
-  c.addEventListener('mousedown', (e) => {
-    if (e.button === 1) e.preventDefault();
-  });
 }
 
 window.addEventListener('resize', () => {
@@ -329,19 +277,16 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     game.clearSelection();
-    render();
+    paint();
+    scheduleHud();
   }
   if (e.key === '+' || e.key === '=') {
-    setFastMode(true);
-    renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1.12);
-    paint();
-    settleDetailedPaint();
+    renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1.1);
+    schedulePaint();
   }
   if (e.key === '-' || e.key === '_') {
-    setFastMode(true);
-    renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1 / 1.12);
-    paint();
-    settleDetailedPaint();
+    renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1 / 1.1);
+    schedulePaint();
   }
 });
 

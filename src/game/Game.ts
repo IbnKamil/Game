@@ -62,6 +62,12 @@ export class Game {
   private provincesDirty = false;
   /** O(1) hex → province lookup; rebuilt with provinces. */
   private provinceByHex = new Map<string, Province>();
+  /** Bumped when terrain/buildings/owners change (not on unit-only moves). */
+  terrainRevision = 0;
+
+  bumpTerrain(): void {
+    this.terrainRevision += 1;
+  }
 
   constructor(config: GameConfig) {
     this.config = config;
@@ -116,6 +122,7 @@ export class Game {
     this.nextProvinceId.value = s.nextProvinceId;
     this.message = s.message;
     this.reindexProvinces();
+    this.bumpTerrain();
   }
 
   private reindexProvinces(): void {
@@ -149,6 +156,7 @@ export class Game {
     }
     this.provinces = rebuildProvinces(this.cells, this.provinces, this.nextProvinceId);
     this.reindexProvinces();
+    this.bumpTerrain();
   }
 
   /** Batch AI/actions: defer expensive province rebuilds. */
@@ -162,6 +170,7 @@ export class Game {
       this.provincesDirty = false;
       this.provinces = rebuildProvinces(this.cells, this.provinces, this.nextProvinceId);
       this.reindexProvinces();
+      this.bumpTerrain();
       this.checkWinner();
     }
   }
@@ -346,6 +355,7 @@ export class Game {
     cell.tree = false;
     cell.palm = false;
     cell.building = building;
+    this.bumpTerrain();
     this.ui.mode = 'none';
     this.ui.selectedKey = key;
     this.message = `Построено: ${building} (−${cost}🪙).`;
@@ -406,6 +416,7 @@ export class Game {
       if (to.tree) {
         to.tree = false;
         to.palm = false;
+        this.bumpTerrain();
         this.message = 'Дерево срублено.';
       } else {
         this.message = 'Юнит перемещён.';
@@ -441,6 +452,7 @@ export class Game {
     to.unit = { ...unit, moved: true };
 
     this.refreshProvinces();
+    this.bumpTerrain();
     if (this.batchDepth === 0) this.checkWinner();
     this.ui = { selectedKey: toKey, mode: 'none', hoverKey: this.ui.hoverKey };
     this.message = 'Территория захвачена!';
@@ -506,6 +518,7 @@ export class Game {
     if (this.currentPlayerId === aliveIds[0] && prevId !== this.currentPlayerId) {
       this.turn += 1;
       spreadTrees(this.cells, this.rng);
+      this.bumpTerrain();
     }
 
     this.beginPlayerTurn(this.currentPlayerId);
