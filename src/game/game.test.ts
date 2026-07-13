@@ -81,6 +81,45 @@ describe('Start menu config', () => {
     state.mapSize = 'pregiant';
     expect(menuToConfig(state).mapRadius).toBe(30);
   });
+
+  it('passes forest density from menu slider', () => {
+    const state = defaultMenuState();
+    expect(state.forestDensity).toBe(10);
+    state.forestDensity = 45;
+    expect(menuToConfig(state).forestDensity).toBe(45);
+    state.forestDensity = 999;
+    expect(menuToConfig(state).forestDensity).toBe(100);
+  });
+});
+
+describe('Forest density', () => {
+  it('places roughly the requested share of trees', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, i === 0));
+    const low = new Game({
+      mapRadius: 8,
+      playerCount: 2,
+      seed: 123,
+      players,
+      aiDifficulty: 'normal',
+      forestDensity: 0,
+    });
+    const treesLow = Object.values(low.cells).filter((c) => c.tree).length;
+    expect(treesLow).toBe(0);
+
+    const high = new Game({
+      mapRadius: 8,
+      playerCount: 2,
+      seed: 123,
+      players,
+      aiDifficulty: 'normal',
+      forestDensity: 60,
+    });
+    const total = Object.keys(high.cells).length;
+    const treesHigh = Object.values(high.cells).filter((c) => c.tree).length;
+    // Starts clear trees on claimed hexes, so allow some slack below target
+    expect(treesHigh / total).toBeGreaterThan(0.35);
+    expect(treesHigh / total).toBeLessThan(0.7);
+  });
 });
 
 describe('Barracks houses', () => {

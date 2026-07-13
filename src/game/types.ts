@@ -94,6 +94,8 @@ export interface GameConfig {
   seed: number;
   players: PlayerSetup[];
   aiDifficulty: AiDifficulty;
+  /** Target % of land hexes with trees at generation (0–100). Default 10. */
+  forestDensity?: number;
 }
 
 export type AiDifficulty = 'easy' | 'normal' | 'hard' | 'expert';

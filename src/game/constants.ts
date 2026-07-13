@@ -137,6 +137,16 @@ export type AiDifficultyId = (typeof AI_DIFFICULTY_PRESETS)[number]['id'];
 export const STARTING_MONEY = 10;
 export const INCOME_PER_HEX = 1;
 
+/** Default share of land hexes with trees at map generation (0–100). */
+export const DEFAULT_FOREST_DENSITY = 10;
+export const FOREST_DENSITY_MIN = 0;
+export const FOREST_DENSITY_MAX = 100;
+
+export function clampForestDensity(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_FOREST_DENSITY;
+  return Math.max(FOREST_DENSITY_MIN, Math.min(FOREST_DENSITY_MAX, Math.round(value)));
+}
+
 export function houseKind(rank: HouseRank): BuildingKind {
   return `house${rank}` as BuildingKind;
 }

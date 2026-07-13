@@ -1,5 +1,10 @@
 import { cellKey, type GameConfig, type HexCell, type Player } from './types';
-import { PLAYER_COLORS, defaultPlayerSetup } from './constants';
+import {
+  DEFAULT_FOREST_DENSITY,
+  PLAYER_COLORS,
+  clampForestDensity,
+  defaultPlayerSetup,
+} from './constants';
 import { hexDistance, hexNeighbors } from './hex';
 import { hexElevation } from './topo';
 
@@ -46,14 +51,7 @@ export function generateMap(config: GameConfig): {
     }
   }
 
-  // Scatter trees — prefer mid elevations (not peaks / not sinks)
-  for (const cell of Object.values(cells)) {
-    const treeChance = 0.05 + (cell.elevation > 0.25 && cell.elevation < 0.75 ? 0.06 : 0);
-    if (rng() < treeChance) {
-      cell.tree = true;
-      if (rng() < 0.35) cell.palm = true;
-    }
-  }
+  scatterTrees(cells, rng, config.forestDensity ?? DEFAULT_FOREST_DENSITY);
 
   const players: Player[] = [];
   for (let i = 1; i <= config.playerCount; i++) {
@@ -73,6 +71,34 @@ export function generateMap(config: GameConfig): {
   placeStartingProvinces(cells, players, rng, config);
 
   return { cells, players };
+}
+
+/** Place trees so that ~forestDensity% of hexes are forested (mid elevations preferred). */
+export function scatterTrees(
+  cells: Record<string, HexCell>,
+  rng: () => number,
+  forestDensity: number,
+): void {
+  const density = clampForestDensity(forestDensity);
+  const keys = Object.keys(cells);
+  if (keys.length === 0 || density <= 0) return;
+
+  const target = Math.round((keys.length * density) / 100);
+  if (target <= 0) return;
+
+  const scored = keys.map((k) => {
+    const e = cells[k].elevation;
+    const mid = e > 0.25 && e < 0.75 ? 1.5 : 1;
+    return { k, score: rng() * mid };
+  });
+  scored.sort((a, b) => b.score - a.score);
+
+  const n = Math.min(target, scored.length);
+  for (let i = 0; i < n; i++) {
+    const cell = cells[scored[i]!.k]!;
+    cell.tree = true;
+    if (rng() < 0.35) cell.palm = true;
+  }
 }
 
 function placeStartingProvinces(

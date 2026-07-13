@@ -1,8 +1,12 @@
 import {
   AI_DIFFICULTY_PRESETS,
+  DEFAULT_FOREST_DENSITY,
   DEFAULT_NATION_NAMES,
+  FOREST_DENSITY_MAX,
+  FOREST_DENSITY_MIN,
   MAP_SIZE_PRESETS,
   PLAYER_COLORS,
+  clampForestDensity,
   defaultPlayerSetup,
   mapRadiusFromSize,
   type AiDifficultyId,
@@ -16,6 +20,8 @@ export interface MenuState {
   humanCount: number;
   mapSize: MapSizeId;
   aiDifficulty: AiDifficultyId;
+  /** Target forest coverage 0–100%. */
+  forestDensity: number;
   players: PlayerSetup[];
 }
 
@@ -27,6 +33,7 @@ export function defaultMenuState(): MenuState {
     humanCount,
     mapSize: 'medium',
     aiDifficulty: 'normal',
+    forestDensity: DEFAULT_FOREST_DENSITY,
     players: Array.from({ length: playerCount }, (_, i) =>
       defaultPlayerSetup(i, i < humanCount),
     ),
@@ -65,6 +72,7 @@ export function menuToConfig(state: MenuState): GameConfig {
     seed: (Math.random() * 1e9) | 0,
     players: state.players.map((p) => ({ ...p })),
     aiDifficulty: state.aiDifficulty as AiDifficulty,
+    forestDensity: clampForestDensity(state.forestDensity ?? DEFAULT_FOREST_DENSITY),
   };
 }
 
@@ -113,6 +121,19 @@ export function mountMenu(
                 </button>`,
               ).join('')}
             </div>
+          </label>
+          <label class="field field-wide">
+            <span>Лесистость карты</span>
+            <input
+              type="range"
+              min="${FOREST_DENSITY_MIN}"
+              max="${FOREST_DENSITY_MAX}"
+              step="5"
+              value="${clampForestDensity(state.forestDensity)}"
+              data-field="forestDensity"
+            />
+            <b>${clampForestDensity(state.forestDensity)}%</b>
+            <em class="field-hint">Доля клеток с деревьями при генерации карты</em>
           </label>
           <label class="field field-wide">
             <span>Сложность ИИ</span>
@@ -173,9 +194,19 @@ export function mountMenu(
         if (field === 'playerCount') {
           state.playerCount = value;
           if (state.humanCount > value) state.humanCount = value;
+          render();
+          return;
         }
-        if (field === 'humanCount') state.humanCount = value;
-        render();
+        if (field === 'humanCount') {
+          state.humanCount = value;
+          render();
+          return;
+        }
+        if (field === 'forestDensity') {
+          state.forestDensity = clampForestDensity(value);
+          const label = input.parentElement?.querySelector('b');
+          if (label) label.textContent = `${state.forestDensity}%`;
+        }
       });
     });
 
