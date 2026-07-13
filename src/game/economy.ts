@@ -158,7 +158,24 @@ export function calcUpkeep(cells: Record<string, HexCell>, province: Province): 
   let upkeep = 0;
   for (const key of province.hexes) {
     const u = cells[key].unit;
-    if (u) upkeep += UNIT_UPKEEP[u.rank];
+    // Only charge the province for its owner's units (allied guests are charged elsewhere)
+    if (u && u.owner === province.owner) upkeep += UNIT_UPKEEP[u.rank];
+  }
+  return upkeep;
+}
+
+/** Upkeep for a player's units standing on foreign (incl. ally) hexes. */
+export function calcForeignUnitUpkeep(
+  cells: Record<string, HexCell>,
+  playerId: PlayerId,
+): number {
+  let upkeep = 0;
+  for (const key in cells) {
+    const cell = cells[key];
+    const u = cell.unit;
+    if (u && u.owner === playerId && cell.owner !== playerId) {
+      upkeep += UNIT_UPKEEP[u.rank];
+    }
   }
   return upkeep;
 }
@@ -167,19 +184,30 @@ export function netIncome(cells: Record<string, HexCell>, province: Province): n
   return calcIncome(cells, province) - calcUpkeep(cells, province);
 }
 
+type AllyFn = (a: PlayerId, b: PlayerId) => boolean;
+
+function isFriendlyUnit(
+  unitOwner: PlayerId,
+  forOwner: PlayerId,
+  allies?: AllyFn,
+): boolean {
+  return unitOwner === forOwner || !!allies?.(forOwner, unitOwner);
+}
+
 /** Defense strength of a hex for the current owner (unit on hex + adjacent friendly units + buildings). */
 export function defenseStrength(
   cells: Record<string, HexCell>,
   q: number,
   r: number,
   forOwner: PlayerId,
+  allies?: AllyFn,
 ): number {
   const key = cellKey(q, r);
   const cell = cells[key];
   if (!cell || cell.owner !== forOwner) return 0;
 
   let strength = 0;
-  if (cell.unit && cell.unit.owner === forOwner) {
+  if (cell.unit && isFriendlyUnit(cell.unit.owner, forOwner, allies)) {
     strength = Math.max(strength, cell.unit.rank);
   }
   if (cell.building) {
@@ -189,7 +217,7 @@ export function defenseStrength(
   for (const n of hexNeighbors(q, r)) {
     const nc = cells[cellKey(n.q, n.r)];
     if (!nc || nc.owner !== forOwner) continue;
-    if (nc.unit && nc.unit.owner === forOwner) {
+    if (nc.unit && isFriendlyUnit(nc.unit.owner, forOwner, allies)) {
       strength = Math.max(strength, nc.unit.rank);
     }
     // Towers/castles protect adjacent hexes
@@ -207,6 +235,7 @@ export function defenseStrengthExcludingHexUnit(
   q: number,
   r: number,
   forOwner: PlayerId,
+  allies?: AllyFn,
 ): number {
   const key = cellKey(q, r);
   const cell = cells[key];
@@ -220,7 +249,7 @@ export function defenseStrengthExcludingHexUnit(
   for (const n of hexNeighbors(q, r)) {
     const nc = cells[cellKey(n.q, n.r)];
     if (!nc || nc.owner !== forOwner) continue;
-    if (nc.unit && nc.unit.owner === forOwner) {
+    if (nc.unit && isFriendlyUnit(nc.unit.owner, forOwner, allies)) {
       strength = Math.max(strength, nc.unit.rank);
     }
     if (nc.building) {
@@ -237,21 +266,31 @@ export function canCapture(
   attacker: Unit,
   targetQ: number,
   targetR: number,
+  allies?: AllyFn,
 ): boolean {
   const target = cells[cellKey(targetQ, targetR)];
   if (!target) return false;
   if (target.owner === attacker.owner) return false;
+  if (allies?.(attacker.owner, target.owner)) return false;
+  // Cannot capture a hex that has an allied unit standing on it
+  if (target.unit && allies?.(attacker.owner, target.unit.owner)) return false;
 
   const atkCount = attacker.count ?? 1;
 
   // Same-rank unit duel: need higher stack, and still beat buildings/adjacent cover
   if (target.unit && target.unit.rank === attacker.rank) {
-    const cover = defenseStrengthExcludingHexUnit(cells, targetQ, targetR, target.owner);
+    const cover = defenseStrengthExcludingHexUnit(
+      cells,
+      targetQ,
+      targetR,
+      target.owner,
+      allies,
+    );
     if (!(attacker.rank > cover || (attacker.rank === 4 && cover === 4))) return false;
     return atkCount > (target.unit.count ?? 1);
   }
 
-  const defense = defenseStrength(cells, targetQ, targetR, target.owner);
+  const defense = defenseStrength(cells, targetQ, targetR, target.owner, allies);
   if (attacker.rank === 4 && defense === 4) return true;
   return attacker.rank > defense;
 }

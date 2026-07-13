@@ -432,3 +432,119 @@ describe('Undo', () => {
     expect(g.cells[empty].building).toBeNull();
   });
 });
+
+describe('Teams / alliances', () => {
+  function alliedGame(seed = 99): Game {
+    const players = Array.from({ length: 3 }, (_, i) => defaultPlayerSetup(i, i === 0));
+    // P1 and P2 on team 1, P3 alone on team 2
+    players[0].teamId = 1;
+    players[1].teamId = 1;
+    players[2].teamId = 2;
+    return new Game({
+      mapRadius: 7,
+      playerCount: 3,
+      seed,
+      players,
+      aiDifficulty: 'normal',
+    });
+  }
+
+  it('menu preserves teamId into config and players', () => {
+    const state = defaultMenuState();
+    state.playerCount = 4;
+    syncPlayers(state);
+    state.players[0].teamId = 1;
+    state.players[1].teamId = 1;
+    state.players[2].teamId = 2;
+    state.players[3].teamId = 2;
+    const config = menuToConfig(state);
+    expect(config.players.map((p) => p.teamId)).toEqual([1, 1, 2, 2]);
+    const g = new Game(config);
+    expect(g.players.map((p) => p.teamId)).toEqual([1, 1, 2, 2]);
+    expect(g.isAlly(1, 2)).toBe(true);
+    expect(g.isAlly(1, 3)).toBe(false);
+    expect(g.allies().map((p) => p.id)).toEqual([2]);
+  });
+
+  it('allows move onto empty ally land and forbids capturing allies', () => {
+    const g = alliedGame(101);
+    const allyHex = Object.values(g.cells).find(
+      (c) => c.owner === 2 && !c.unit && !c.building && !c.tree,
+    )!;
+    const allyKey = cellKey(allyHex.q, allyHex.r);
+
+    // Place unit on a neighboring hex owned by player 1 (forge ownership if needed)
+    const n = hexNeighbors(allyHex.q, allyHex.r).find((x) => g.cells[cellKey(x.q, x.r)]);
+    expect(n).toBeTruthy();
+    const fromKey = cellKey(n!.q, n!.r);
+    const from = g.cells[fromKey];
+    from.owner = 1;
+    from.building = null;
+    from.tree = false;
+    from.palm = false;
+    from.unit = {
+      id: g.nextUnitId++,
+      owner: 1,
+      rank: 2,
+      moved: false,
+      count: 1,
+    };
+
+    const targets = g.moveTargets(fromKey);
+    expect(targets.has(allyKey)).toBe(true);
+    expect(
+      canCapture(g.cells, from.unit!, allyHex.q, allyHex.r, (a, b) => g.isAlly(a, b)),
+    ).toBe(false);
+
+    g.moveUnitTo(fromKey, allyKey);
+    expect(g.cells[allyKey].unit?.owner).toBe(1);
+    expect(g.cells[allyKey].owner).toBe(2); // land stays ally's
+  });
+
+  it('transfers money and gifts units to allies only', () => {
+    const g = alliedGame(55);
+    const from = g.provinces.find((p) => p.owner === 1)!;
+    const allyProv = g.provinces.find((p) => p.owner === 2)!;
+    const enemyProv = g.provinces.find((p) => p.owner === 3)!;
+    from.money = 40;
+    const allyBefore = allyProv.money;
+    const enemyBefore = enemyProv.money;
+
+    g.ui = { selectedKey: from.capitalKey, mode: 'none', hoverKey: null };
+    expect(g.sendMoneyToAlly(2, 10)).toBe(true);
+    expect(from.money).toBe(30);
+    expect(g.provinces.find((p) => p.id === allyProv.id)!.money).toBe(allyBefore + 10);
+    expect(g.sendMoneyToAlly(3, 10)).toBe(false);
+    expect(g.provinces.find((p) => p.id === enemyProv.id)!.money).toBe(enemyBefore);
+
+    const empty = from.hexes.find((h) => !g.cells[h].unit)!;
+    g.cells[empty].unit = {
+      id: g.nextUnitId++,
+      owner: 1,
+      rank: 1,
+      moved: false,
+      count: 1,
+    };
+    expect(g.giftUnit(empty, 3)).toBe(false);
+    expect(g.cells[empty].unit?.owner).toBe(1);
+    expect(g.giftUnit(empty, 2)).toBe(true);
+    expect(g.cells[empty].unit?.owner).toBe(2);
+    expect(g.cells[empty].unit?.moved).toBe(true);
+  });
+
+  it('wins by team when only one alliance remains', () => {
+    const g = alliedGame(77);
+    for (const key of Object.keys(g.cells)) {
+      if (g.cells[key].owner === 3) {
+        g.cells[key].owner = 1;
+        g.cells[key].unit = null;
+        if (g.cells[key].building === 'castle') g.cells[key].building = null;
+      }
+    }
+    g.beginPlayerTurn(1);
+    expect(g.winnerId).not.toBeNull();
+    const winner = g.players.find((p) => p.id === g.winnerId)!;
+    expect(winner.teamId).toBe(1);
+    expect(g.message).toMatch(/команды 1/);
+  });
+});

@@ -66,6 +66,7 @@ export function generateMap(config: GameConfig): {
       color: setup.color || PLAYER_COLORS[(i - 1) % PLAYER_COLORS.length],
       isHuman: setup.isHuman,
       alive: true,
+      teamId: setup.teamId || i,
     });
   }
 

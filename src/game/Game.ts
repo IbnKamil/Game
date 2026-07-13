@@ -13,6 +13,7 @@ import {
 import {
   adjacentEmptyOwned,
   applyIncomeAndStarve,
+  calcForeignUnitUpkeep,
   canCapture,
   defenseStrength,
   farmCost,
@@ -24,7 +25,9 @@ import {
   spreadTrees,
 } from './economy';
 import { cloneCells, clonePlayers, cloneProvinces } from './clone';
-import { hexDistance, hexNeighbors } from './hex';import { createRng, generateMap } from './mapgen';
+import { hexDistance, hexNeighbors } from './hex';
+import { createRng, generateMap } from './mapgen';
+import { alliesOf, isAlly, isEnemy } from './teams';
 import {
   cellKey,
   type BuildingKind,
@@ -200,15 +203,42 @@ export class Game {
     for (const p of this.players) {
       p.alive = aliveOwners.has(p.id);
     }
-    if (aliveOwners.size <= 1) {
-      this.winnerId =
-        aliveOwners.size === 1 ? [...aliveOwners][0]! : this.currentPlayerId;
+    const aliveTeams = new Set(
+      [...aliveOwners].map((id) => this.players.find((p) => p.id === id)?.teamId ?? id),
+    );
+    if (aliveTeams.size <= 1) {
+      const winnerPlayerId =
+        aliveOwners.size >= 1 ? [...aliveOwners][0]! : this.currentPlayerId;
+      this.winnerId = winnerPlayerId;
       const winner = this.players.find((p) => p.id === this.winnerId);
-      this.message =
-        aliveOwners.size === 1
-          ? `${winner?.name ?? 'Игрок'} побеждает!`
-          : 'Игра окончена.';
+      const teamMates = this.players.filter(
+        (p) => p.teamId === winner?.teamId && aliveOwners.has(p.id),
+      );
+      if (aliveTeams.size === 1 && teamMates.length > 1) {
+        this.message = `Победа команды ${winner?.teamId}: ${teamMates.map((p) => p.name).join(', ')}!`;
+      } else if (aliveTeams.size === 1) {
+        this.message = `${winner?.name ?? 'Игрок'} побеждает!`;
+      } else {
+        this.message = 'Игра окончена.';
+      }
     }
+  }
+
+  isAlly(a: PlayerId, b: PlayerId): boolean {
+    return isAlly(this.players, a, b);
+  }
+
+  isEnemy(a: PlayerId, b: PlayerId): boolean {
+    return isEnemy(this.players, a, b);
+  }
+
+  /** Friendly land for movement: own or allied territory. */
+  isFriendlyLand(unitOwner: PlayerId, hexOwner: PlayerId): boolean {
+    return this.isAlly(unitOwner, hexOwner);
+  }
+
+  allies(): ReturnType<typeof alliesOf> {
+    return alliesOf(this.players, this.currentPlayerId);
   }
 
   selectHex(key: string | null): void {
@@ -423,9 +453,13 @@ export class Game {
       return;
     }
 
-    // Friendly territory: move up to 2 hexes, or merge same-rank stacks
-    if (to.owner === unit.owner) {
+    // Friendly territory (own or ally): move up to 2 hexes, or merge same-rank own stacks
+    if (this.isFriendlyLand(unit.owner, to.owner)) {
       if (to.unit) {
+        if (to.unit.owner !== unit.owner) {
+          this.message = 'На клетке стоит юнит союзника.';
+          return;
+        }
         if (to.unit.rank !== unit.rank) {
           this.message = 'Можно объединять только юнитов одного ранга.';
           return;
@@ -449,9 +483,15 @@ export class Game {
         to.tree = false;
         to.palm = false;
         this.bumpTerrain();
-        this.message = 'Дерево срублено.';
+        this.message =
+          to.owner === unit.owner
+            ? 'Дерево срублено.'
+            : 'Дерево срублено на земле союзника.';
       } else {
-        this.message = 'Юнит перемещён.';
+        this.message =
+          to.owner === unit.owner
+            ? 'Юнит перемещён.'
+            : 'Юнит перемещён по земле союзника.';
       }
       from.unit = null;
       to.unit = { ...unit, count: unit.count ?? 1, moved: true };
@@ -466,11 +506,13 @@ export class Game {
       return;
     }
 
-    if (!canCapture(this.cells, unit, to.q, to.r)) {
+    if (!canCapture(this.cells, unit, to.q, to.r, (a, b) => this.isAlly(a, b))) {
       if (to.unit && to.unit.rank === unit.rank) {
         this.message = `Нужен больший отряд (у вас ×${unit.count ?? 1}, у врага ×${to.unit.count ?? 1}).`;
       } else {
-        const def = defenseStrength(this.cells, to.q, to.r, to.owner);
+        const def = defenseStrength(this.cells, to.q, to.r, to.owner, (a, b) =>
+          this.isAlly(a, b),
+        );
         this.message = `Слишком сильная защита (${def}). Нужен ранг > ${def}.`;
       }
       return;
@@ -584,9 +626,34 @@ export class Game {
       this.cells,
       mine,
     );
+    // Units on ally/foreign land: charge richest own province
+    const foreign = calcForeignUnitUpkeep(this.cells, playerId);
+    if (foreign > 0 && mine.length) {
+      const rich = [...mine].sort((a, b) => b.money - a.money)[0]!;
+      rich.money -= foreign;
+      if (rich.money < 0) {
+        for (const key of rich.hexes) {
+          const cell = this.cells[key];
+          if (cell.unit && cell.unit.owner === playerId) {
+            cell.unit = null;
+            cell.tree = true;
+          }
+        }
+        // Also kill foreign-stationed units of this player
+        for (const key in this.cells) {
+          const cell = this.cells[key];
+          if (cell.unit?.owner === playerId && cell.owner !== playerId) {
+            cell.unit = null;
+          }
+        }
+        rich.money = 0;
+        msgs.push('Не хватило монет на содержание юнитов за рубежом.');
+      }
+    }
     this.refreshProvinces();
     this.bumpUnits();
     this.checkWinner();
+    if (this.winnerId) return;
 
     const player = this.currentPlayer();
     if (player.isHuman) {
@@ -600,14 +667,76 @@ export class Game {
     }
   }
 
+  /** Send money from one of your provinces to an ally province. */
+  transferMoney(fromProvinceId: number, toProvinceId: number, amount: number): boolean {
+    if (this.winnerId || this.currentPlayerId === 0) return false;
+    const from = this.provinces.find((p) => p.id === fromProvinceId);
+    const to = this.provinces.find((p) => p.id === toProvinceId);
+    if (!from || !to) return false;
+    if (from.owner !== this.currentPlayerId) return false;
+    if (!this.isAlly(from.owner, to.owner) || from.owner === to.owner) return false;
+    const amt = Math.floor(amount);
+    if (amt <= 0 || from.money < amt) {
+      this.message = 'Недостаточно монет для перевода.';
+      return false;
+    }
+    this.pushUndo();
+    from.money -= amt;
+    to.money += amt;
+    const ally = this.players.find((p) => p.id === to.owner);
+    this.message = `Передано ${amt}🪙 союзнику «${ally?.name ?? to.owner}».`;
+    return true;
+  }
+
+  /** Send money from the selected province to an ally's largest province. */
+  sendMoneyToAlly(allyId: PlayerId, amount: number): boolean {
+    const from = this.selectedProvince();
+    if (!from || from.owner !== this.currentPlayerId) {
+      this.message = 'Выберите свою провинцию для перевода.';
+      return false;
+    }
+    const dest = this.provinces
+      .filter((p) => p.owner === allyId)
+      .sort((a, b) => b.hexes.length - a.hexes.length || b.money - a.money)[0];
+    if (!dest) {
+      this.message = 'У союзника нет провинций.';
+      return false;
+    }
+    return this.transferMoney(from.id, dest.id, amount);
+  }
+
+  /** Gift selected unit to an ally (ownership transfer). */
+  giftUnit(unitKey: string, toPlayerId: PlayerId): boolean {
+    if (this.winnerId || this.currentPlayerId === 0) return false;
+    const cell = this.cells[unitKey];
+    if (!cell?.unit || cell.unit.owner !== this.currentPlayerId) return false;
+    if (!this.isAlly(this.currentPlayerId, toPlayerId) || toPlayerId === this.currentPlayerId) {
+      this.message = 'Передавать можно только союзнику.';
+      return false;
+    }
+    if (cell.unit.moved) {
+      this.message = 'Юнит уже ходил в этот ход.';
+      return false;
+    }
+    this.pushUndo();
+    cell.unit = { ...cell.unit, owner: toPlayerId, moved: true };
+    const ally = this.players.find((p) => p.id === toPlayerId);
+    this.message = `${UNIT_LABEL[cell.unit.rank]} ×${cell.unit.count ?? 1} передан «${ally?.name ?? toPlayerId}».`;
+    this.bumpUnits();
+    this.clearSelection();
+    return true;
+  }
+
   /** Valid move targets for selected unit. */
   moveTargets(fromKey: string): Set<string> {
     const from = this.cells[fromKey];
     const result = new Set<string>();
     if (!from?.unit || from.unit.moved) return result;
     const unit = from.unit;
+    const allyCheck = (a: PlayerId, b: PlayerId) => this.isAlly(a, b);
 
-    // Own territory: BFS up to 2 steps through empty owned hexes; can land on same-rank stack
+    // Own + ally territory: BFS up to 2 steps through empty friendly hexes;
+    // can land on own same-rank stack to merge.
     const queue: { key: string; dist: number }[] = [{ key: fromKey, dist: 0 }];
     const seen = new Set<string>([fromKey]);
     while (queue.length) {
@@ -618,11 +747,12 @@ export class Game {
         const nk = cellKey(n.q, n.r);
         if (seen.has(nk)) continue;
         const to = this.cells[nk];
-        if (!to || to.owner !== unit.owner) continue;
+        if (!to || !this.isFriendlyLand(unit.owner, to.owner)) continue;
         if (to.unit) {
-          if (to.unit.rank === unit.rank) {
+          // Merge only with own same-rank stacks (not allied stacks)
+          if (to.unit.owner === unit.owner && to.unit.rank === unit.rank) {
             seen.add(nk);
-            result.add(nk); // merge target — do not path through
+            result.add(nk);
           }
           continue;
         }
@@ -632,12 +762,15 @@ export class Game {
       }
     }
 
-    // Attacks / neutral capture: adjacent only
+    // Attacks / neutral capture: adjacent only, never allies
     for (const n of hexNeighbors(from.q, from.r)) {
       const nk = cellKey(n.q, n.r);
       const to = this.cells[nk];
       if (!to) continue;
-      if (to.owner !== unit.owner && canCapture(this.cells, unit, to.q, to.r)) {
+      if (
+        this.isEnemy(unit.owner, to.owner) &&
+        canCapture(this.cells, unit, to.q, to.r, allyCheck)
+      ) {
         result.add(nk);
       }
     }

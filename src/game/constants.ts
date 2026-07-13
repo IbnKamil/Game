@@ -157,11 +157,13 @@ export function defaultPlayerSetup(index: number, isHuman: boolean): {
   name: string;
   color: string;
   isHuman: boolean;
+  teamId: number;
 } {
   return {
     name: DEFAULT_NATION_NAMES[index % DEFAULT_NATION_NAMES.length],
     color: PLAYER_COLORS[index % PLAYER_COLORS.length],
     isHuman,
+    teamId: index + 1,
   };
 }
 

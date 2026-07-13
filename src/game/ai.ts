@@ -200,6 +200,18 @@ function scoreMove(
   const small = !!myProv && myProv.hexes.length <= 5;
 
   if (cell.owner !== 0 && cell.owner !== playerId) {
+    // Allied land: treat as friendly repositioning (never attack)
+    if (game.isAlly(playerId, cell.owner)) {
+      s += 3;
+      for (const n of hexNeighbors(cell.q, cell.r)) {
+        const nc = game.cells[cellKey(n.q, n.r)];
+        if (nc && nc.owner !== 0 && nc.owner !== playerId && !game.isAlly(playerId, nc.owner)) {
+          s += 10 * profile.aggression;
+          break;
+        }
+      }
+      return s;
+    }
     s += 55 * profile.aggression;
     if (cell.building === 'castle') s += 90;
     else if (isHouseBuilding(cell.building)) s += 55;
@@ -228,6 +240,7 @@ function scoreMove(
       const nc = game.cells[cellKey(n.q, n.r)];
       if (!nc) continue;
       if (nc.owner !== 0 && nc.owner !== playerId) {
+        if (game.isAlly(playerId, nc.owner)) continue;
         touchesEnemy = true;
         if (!nc.unit || (nc.unit.rank ?? 0) < unit.rank) enemyWeak = true;
       }
@@ -251,8 +264,10 @@ function scoreMove(
       for (const n of hexNeighbors(cell.q, cell.r)) {
         const nc = game.cells[cellKey(n.q, n.r)];
         if (nc && nc.owner !== 0 && nc.owner !== playerId) {
-          s += 12;
-          break;
+          if (!game.isAlly(playerId, nc.owner)) {
+            s += 12;
+            break;
+          }
         }
       }
     }
@@ -265,8 +280,10 @@ function scoreMove(
   for (const n of hexNeighbors(cell.q, cell.r)) {
     const nc = game.cells[cellKey(n.q, n.r)];
     if (nc && nc.owner !== 0 && nc.owner !== playerId) {
-      s += 12 * profile.aggression;
-      break;
+      if (!game.isAlly(playerId, nc.owner)) {
+        s += 12 * profile.aggression;
+        break;
+      }
     }
     if (nc && nc.owner === 0) {
       s += 3 * profile.aggression;
@@ -344,7 +361,9 @@ function isThreatened(game: Game, hexes: string[], owner: PlayerId): boolean {
     const c = game.cells[key];
     for (const n of hexNeighbors(c.q, c.r)) {
       const nc = game.cells[cellKey(n.q, n.r)];
-      if (nc && nc.owner !== 0 && nc.owner !== owner) return true;
+      if (nc && nc.owner !== 0 && nc.owner !== owner && !game.isAlly(owner, nc.owner)) {
+        return true;
+      }
     }
   }
   return false;
@@ -355,7 +374,15 @@ function enemyUnitAdjacent(game: Game, hexes: string[], owner: PlayerId): boolea
     const c = game.cells[key];
     for (const n of hexNeighbors(c.q, c.r)) {
       const nc = game.cells[cellKey(n.q, n.r)];
-      if (nc && nc.owner !== 0 && nc.owner !== owner && nc.unit) return true;
+      if (
+        nc &&
+        nc.owner !== 0 &&
+        nc.owner !== owner &&
+        !game.isAlly(owner, nc.owner) &&
+        nc.unit
+      ) {
+        return true;
+      }
     }
   }
   return false;

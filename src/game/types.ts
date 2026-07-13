@@ -61,6 +61,8 @@ export interface Player {
   color: string;
   isHuman: boolean;
   alive: boolean;
+  /** Allies share the same teamId (1..N). */
+  teamId: number;
 }
 
 /** Setup entry from the start menu. */
@@ -68,6 +70,8 @@ export interface PlayerSetup {
   name: string;
   color: string;
   isHuman: boolean;
+  /** Allies share the same teamId (1..N). Default: solo team per player. */
+  teamId: number;
 }
 
 export type SelectionMode =

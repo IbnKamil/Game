@@ -148,6 +148,18 @@ hud.on({
     paintOverlay();
     hud.update(game!);
   },
+  sendMoney: (allyId, amount) => {
+    if (!game?.currentPlayer().isHuman || game.winnerId) return;
+    game.sendMoneyToAlly(allyId, amount);
+    render();
+  },
+  giftUnit: (allyId) => {
+    if (!game?.currentPlayer().isHuman || game.winnerId) return;
+    const key = game.ui.selectedKey;
+    if (!key) return;
+    game.giftUnit(key, allyId);
+    render();
+  },
 });
 
 let bound = false;

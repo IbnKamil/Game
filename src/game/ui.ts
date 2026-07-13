@@ -80,6 +80,13 @@ export function mountHud(root: HTMLElement): {
     if (act === 'summon') handlers.summon?.();
     if (act === 'close-summon') handlers.closeSummon?.();
     if (act.startsWith('build:')) handlers.build?.(act.slice(6) as SelectionMode);
+    if (act.startsWith('pay:')) {
+      const [, allyId, amount] = act.split(':');
+      handlers.sendMoney?.(Number(allyId), Number(amount));
+    }
+    if (act.startsWith('gift:')) {
+      handlers.giftUnit?.(Number(act.slice(5)));
+    }
   });
 
   function update(game: Game): void {
@@ -100,7 +107,15 @@ export function mountHud(root: HTMLElement): {
     if (game.winnerId) {
       winModal.hidden = false;
       const w = game.players.find((p) => p.id === game.winnerId);
-      winTitle.textContent = w?.isHuman ? 'Победа!' : `${w?.name ?? 'ИИ'} победил`;
+      const team = game.players.filter(
+        (p) => p.teamId === w?.teamId && p.alive,
+      );
+      winTitle.textContent =
+        team.length > 1
+          ? `Победа команды ${w?.teamId}!`
+          : w?.isHuman
+            ? 'Победа!'
+            : `${w?.name ?? 'ИИ'} победил`;
     } else {
       winModal.hidden = true;
     }
@@ -119,10 +134,12 @@ export function mountHud(root: HTMLElement): {
       html += `<li class="${p.alive ? '' : 'dead'} ${p.id === game.currentPlayerId ? 'active' : ''}">
         <span class="dot" style="background:${p.color}"></span>
         ${p.name}
-        <span class="muted">${p.alive ? money + '🪙' : '✕'}${p.isHuman ? '' : ' · ИИ'}</span>
+        <span class="muted">К${p.teamId} · ${p.alive ? money + '🪙' : '✕'}${p.isHuman ? '' : ' · ИИ'}</span>
       </li>`;
     }
     html += `</ul>`;
+
+    const allies = human ? game.allies() : [];
 
     if (prov && prov.owner === game.currentPlayerId) {
       const income = calcIncome(game.cells, prov);
@@ -174,7 +191,27 @@ export function mountHud(root: HTMLElement): {
           );
         }
         html += `</div>`;
-        html += `<p class="hint">Клавиши 1–7 — постройки. «ё» / Enter — конец хода. Клик по зданию призыва открывает вызов (юнит ×1 через N ходов).</p>`;
+
+        if (allies.length) {
+          html += `<h3>Союзники — деньги</h3><div class="btn-grid">`;
+          for (const ally of allies) {
+            const dest = game.provinces
+              .filter((pr) => pr.owner === ally.id)
+              .sort((a, b) => b.hexes.length - a.hexes.length)[0];
+            if (!dest) continue;
+            const can10 = prov.money >= 10;
+            const can25 = prov.money >= 25;
+            html += `<div class="ally-pay">
+              <span class="dot" style="background:${ally.color}"></span>
+              <span>${ally.name}</span>
+              <button type="button" data-act="pay:${ally.id}:10" ${can10 ? '' : 'disabled'}>+10🪙</button>
+              <button type="button" data-act="pay:${ally.id}:25" ${can25 ? '' : 'disabled'}>+25🪙</button>
+            </div>`;
+          }
+          html += `</div>`;
+        }
+
+        html += `<p class="hint">Клавиши 1–7 — постройки. «ё» / Enter — конец хода. Союзники: ходьба по их земле, перевод монет и юнитов.</p>`;
       }
     } else {
       html += `<p class="hint">Выберите свою провинцию на карте.</p>`;
@@ -183,7 +220,15 @@ export function mountHud(root: HTMLElement): {
     if (sel?.unit) {
       const label = UNIT_LABEL[sel.unit.rank];
       const n = sel.unit.count ?? 1;
+      const mine = sel.unit.owner === game.currentPlayerId;
       html += `<h3>${label} ×${n}</h3><p>Ранг ${sel.unit.rank}${sel.unit.moved ? ' (уже ходили)' : ''}. Свои того же ранга — объединение. Атака равных — если ваш × больше.</p>`;
+      if (human && mine && !sel.unit.moved && allies.length) {
+        html += `<h3>Передать юнита</h3><div class="btn-grid">`;
+        for (const ally of allies) {
+          html += `<button type="button" data-act="gift:${ally.id}">→ ${ally.name}</button>`;
+        }
+        html += `</div>`;
+      }
     }
 
     html += `
@@ -201,8 +246,8 @@ export function mountHud(root: HTMLElement): {
       <ul class="rules">
         <li>Доход с гексов и ферм; юниты едят монеты.</li>
         <li>Захват: ранг юнита &gt; защиты клетки.</li>
-        <li>Объединение юнитов отключено.</li>
-        <li>По своей территории ход до 2 клеток.</li>
+        <li>Союзники: одна команда в меню, ходьба по союзной земле.</li>
+        <li>По своей/союзной территории ход до 2 клеток.</li>
         <li>Вызов только из зданий призыва.</li>
       </ul>
     `;
@@ -301,4 +346,6 @@ interface HudHandlers {
   summon?: () => void;
   closeSummon?: () => void;
   build?: (mode: SelectionMode) => void;
+  sendMoney?: (allyId: number, amount: number) => void;
+  giftUnit?: (allyId: number) => void;
 }

@@ -41,6 +41,7 @@ export function syncPlayers(state: MenuState): void {
       next.push({
         ...prev,
         isHuman: i < state.humanCount,
+        teamId: prev.teamId || i + 1,
       });
     } else {
       next.push(defaultPlayerSetup(i, i < state.humanCount));
@@ -48,6 +49,10 @@ export function syncPlayers(state: MenuState): void {
   }
   for (let i = 0; i < next.length; i++) {
     next[i].isHuman = i < state.humanCount;
+    if (!next[i].teamId) next[i].teamId = i + 1;
+    // Clamp team id to available player slots
+    if (next[i].teamId < 1) next[i].teamId = 1;
+    if (next[i].teamId > state.playerCount) next[i].teamId = state.playerCount;
   }
   state.players = next;
 }
@@ -132,11 +137,21 @@ export function mountMenu(
               <span class="nation-idx">${i + 1}</span>
               <input type="text" maxlength="28" value="${escapeAttr(p.name)}" data-name="${i}" aria-label="Название государства ${i + 1}" />
               <input type="color" value="${toColorInput(p.color)}" data-color="${i}" aria-label="Цвет ${i + 1}" />
+              <label class="nation-team">
+                <span>Команда</span>
+                <select data-team="${i}" aria-label="Команда ${i + 1}">
+                  ${Array.from({ length: state.playerCount }, (_, t) => {
+                    const tid = t + 1;
+                    return `<option value="${tid}" ${p.teamId === tid ? 'selected' : ''}>${tid}</option>`;
+                  }).join('')}
+                </select>
+              </label>
               <span class="nation-role">${p.isHuman ? 'Игрок' : 'ИИ'}</span>
             </div>`,
             )
             .join('')}
         </div>
+        <em class="field-hint">Одинаковый номер команды — союзники: ходят по земле друг друга, могут переводить монеты и юнитов. Победа засчитывается всей команде.</em>
 
         <div class="menu-legend">
           <div class="legend-item"><canvas data-preview="unit1" width="110" height="56"></canvas><span>1 — ополченец (охотник) ×1, стак до ×N</span></div>
@@ -195,6 +210,13 @@ export function mountMenu(
         state.players[i].color = input.value;
         const row = input.closest('.nation-row') as HTMLElement;
         row.style.setProperty('--c', input.value);
+      });
+    });
+
+    el.querySelectorAll<HTMLSelectElement>('[data-team]').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const i = Number(sel.dataset.team);
+        state.players[i].teamId = Number(sel.value) || i + 1;
       });
     });
 
