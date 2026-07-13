@@ -190,23 +190,40 @@ export function drawUnitFigurine(
   rank: UnitRank,
   moved: boolean,
   teamColor: string,
-  opts: { compact?: boolean } = {},
+  _opts: { compact?: boolean } = {},
 ): void {
   ctx.save();
   ctx.globalAlpha = moved ? 0.55 : 1;
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'medium';
+  ctx.imageSmoothingQuality = 'low';
 
-  if (rank === 1) drawGroup(ctx, x, y, UNIT_FIGURE_COUNT[1], teamColor, drawMilitia, 0.85);
-  else if (rank === 2) drawSoldierSquad(ctx, x, y, teamColor, opts.compact === true);
-  else if (rank === 3) drawSpecOpsSquad(ctx, x, y, teamColor);
-  else drawTank(ctx, x, y, teamColor);
+  // One photo sprite per unit (not 5–10 copies) — keeps map interaction smooth
+  if (rank === 1) drawMilitia(ctx, x, y, teamColor);
+  else if (rank === 2) drawSoldier(ctx, x, y, teamColor);
+  else if (rank === 3) {
+    drawGunTruck(ctx, x + 4, y + 4, teamColor);
+    drawSpecOps(ctx, x - 6, y - 2, teamColor);
+  } else {
+    drawTank(ctx, x, y, teamColor);
+  }
 
   drawBadge(ctx, x, y, rank);
+  const count = UNIT_FIGURE_COUNT[rank];
+  if (count > 1 && rank <= 2) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath();
+    ctx.arc(x + 12, y + 10, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 9px Outfit, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`×${count}`, x + 12, y + 10.5);
+  }
   ctx.restore();
 }
 
-/** Fast LOD icon when zoomed out. */
+/** Fast LOD icon when zoomed out or during pan/zoom. */
 export function drawUnitLod(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -217,95 +234,35 @@ export function drawUnitLod(
 ): void {
   ctx.save();
   ctx.globalAlpha = moved ? 0.5 : 1;
-  shadow(ctx, x, y + 4, 8, 3, 0.25);
   if (rank === 4) {
-    isoBox(ctx, x, y + 1, 14, 8, 5, teamColor);
-    isoBox(ctx, x + 6, y - 1, 8, 2, 1.5, '#222');
+    ctx.fillStyle = teamColor;
+    ctx.fillRect(x - 10, y - 4, 20, 10);
+    ctx.fillStyle = '#495057';
+    ctx.fillRect(x + 2, y - 6, 12, 4);
+  } else if (rank === 3) {
+    ctx.fillStyle = '#868e96';
+    ctx.fillRect(x - 8, y + 2, 16, 8);
+    ctx.fillStyle = teamColor;
+    ctx.beginPath();
+    ctx.arc(x - 4, y - 2, 4, 0, Math.PI * 2);
+    ctx.fill();
   } else {
-    const n = rank === 2 ? 5 : 3;
-    for (let i = 0; i < n; i++) {
-      const dx = (i - (n - 1) / 2) * 4.5;
-      ctx.fillStyle = teamColor;
+    ctx.fillStyle = teamColor;
+    ctx.beginPath();
+    ctx.arc(x, y - 2, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(x - 2.5, y + 2, 5, 7);
+    if (rank === 2) {
       ctx.beginPath();
-      ctx.arc(x + dx, y, 2.8, 0, Math.PI * 2);
+      ctx.arc(x - 7, y, 3.5, 0, Math.PI * 2);
+      ctx.arc(x + 7, y, 3.5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fillRect(x + dx - 1, y + 2, 2, 4);
-    }
-    if (rank === 3) {
-      isoBox(ctx, x, y + 6, 10, 5, 3, '#868e96');
-      isoBox(ctx, x + 2, y + 3, 4, 2, 2.5, teamColor);
     }
   }
   drawBadge(ctx, x, y - 2, rank);
   ctx.restore();
 }
 
-function offsetsForCount(count: number): { dx: number; dy: number }[] {
-  if (count === 1) return [{ dx: 0, dy: 0 }];
-  if (count === 3) {
-    return [
-      { dx: -9, dy: 3.5 },
-      { dx: 0, dy: -2.5 },
-      { dx: 9, dy: 3.5 },
-    ];
-  }
-  if (count === 5) {
-    return [
-      { dx: -12, dy: 4.5 },
-      { dx: -6, dy: -1.5 },
-      { dx: 0, dy: 5.5 },
-      { dx: 6, dy: -1.5 },
-      { dx: 12, dy: 4.5 },
-    ];
-  }
-  // 10 soldiers — two ranks of five (spacing for full militia-sized figures)
-  const out: { dx: number; dy: number }[] = [];
-  for (let row = 0; row < 2; row++) {
-    for (let col = 0; col < 5; col++) {
-      out.push({
-        dx: -16 + col * 8 + (row === 1 ? 2 : 0),
-        dy: -5 + row * 9,
-      });
-    }
-  }
-  return out;
-}
-
-function drawGroup(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  count: number,
-  teamColor: string,
-  drawOne: (ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string) => void,
-  scale = 1,
-): void {
-  const offs = offsetsForCount(count).sort((a, b) => a.dy - b.dy);
-  for (const o of offs) {
-    if (scale !== 1) {
-      ctx.save();
-      ctx.translate(x + o.dx, y + o.dy);
-      ctx.scale(scale, scale);
-      drawOne(ctx, 0, 0, teamColor);
-      ctx.restore();
-    } else {
-      drawOne(ctx, x + o.dx, y + o.dy, teamColor);
-    }
-  }
-}
-
-function drawSoldierSquad(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  teamColor: string,
-  compact: boolean,
-): void {
-  // Same figure scale as militia (drawGroup 0.85)
-  const scale = compact ? 0.72 : 0.85;
-  drawGroup(ctx, x, y, 10, teamColor, compact ? drawSoldierSimple : drawSoldier, scale);
-}
 
 type UnitSpriteId = 'militia' | 'soldier' | 'specops' | 'guntruck' | 't90';
 
@@ -406,26 +363,6 @@ function drawPhotoUnit(
   }
 }
 
-function drawSoldierSimple(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
-  drawPhotoUnit(ctx, x, y, 'soldier', 20, teamColor, { markY: y + 7 });
-}
-
-function drawSpecOpsSquad(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  teamColor: string,
-): void {
-  drawGunTruck(ctx, x + 3, y + 3, teamColor);
-  const offs = [
-    { dx: -12, dy: -1 },
-    { dx: -2, dy: -4 },
-    { dx: 8, dy: -1 },
-  ];
-  for (const o of offs.sort((a, b) => a.dy - b.dy)) {
-    drawSpecOps(ctx, x + o.dx, y + o.dy, teamColor);
-  }
-}
 
 function drawGunTruck(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
   const size = 34;

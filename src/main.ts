@@ -167,7 +167,23 @@ let panLastY = 0;
 let panMoved = false;
 let hoverRaf = 0;
 let zoomRaf = 0;
+let settleTimer = 0;
 let pendingZoom: { sx: number; sy: number; factor: number } | null = null;
+
+function setFastMode(on: boolean): void {
+  if (!renderer) return;
+  if (renderer.fastMode === on) return;
+  renderer.fastMode = on;
+  renderer.resize();
+}
+
+function settleDetailedPaint(): void {
+  window.clearTimeout(settleTimer);
+  settleTimer = window.setTimeout(() => {
+    setFastMode(false);
+    paint();
+  }, 120);
+}
 
 function scheduleHoverDraw(): void {
   if (hoverRaf) return;
@@ -178,6 +194,7 @@ function scheduleHoverDraw(): void {
 }
 
 function scheduleZoomDraw(): void {
+  setFastMode(true);
   if (zoomRaf) return;
   zoomRaf = window.requestAnimationFrame(() => {
     zoomRaf = 0;
@@ -186,6 +203,7 @@ function scheduleZoomDraw(): void {
       pendingZoom = null;
     }
     paint();
+    settleDetailedPaint();
   });
 }
 
@@ -205,6 +223,7 @@ function bindCanvas(c: HTMLCanvasElement): void {
       panMoved = false;
       panLastX = e.clientX;
       panLastY = e.clientY;
+      setFastMode(true);
       c.style.cursor = 'grabbing';
     }
   });
@@ -226,6 +245,7 @@ function bindCanvas(c: HTMLCanvasElement): void {
     if (e.button === 1 && panning) {
       panning = false;
       if (canvas) canvas.style.cursor = 'crosshair';
+      settleDetailedPaint();
     }
   });
 
@@ -243,7 +263,11 @@ function bindCanvas(c: HTMLCanvasElement): void {
     } else {
       game.selectHex(key);
     }
-    render();
+    // Paint first, HUD on next frame — keeps clicks snappy
+    paint();
+    window.requestAnimationFrame(() => {
+      if (game) hud.update(game);
+    });
   });
 
   c.addEventListener('mousemove', (e) => {
@@ -308,12 +332,16 @@ window.addEventListener('keydown', (e) => {
     render();
   }
   if (e.key === '+' || e.key === '=') {
+    setFastMode(true);
     renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1.12);
     paint();
+    settleDetailedPaint();
   }
   if (e.key === '-' || e.key === '_') {
+    setFastMode(true);
     renderer?.zoomAt(renderer.canvas.clientWidth / 2, renderer.canvas.clientHeight / 2, 1 / 1.12);
     paint();
+    settleDetailedPaint();
   }
 });
 

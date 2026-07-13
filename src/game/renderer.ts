@@ -1,13 +1,22 @@
 import type { Game } from './Game';
-import { hexCorners, hexToPixel, pixelToHex } from './hex';
+import { hexToPixel, pixelToHex } from './hex';
 import { drawBuildingFigurine, drawUnitFigurine, drawUnitLod } from './sprites';
-import { cellKey, type UnitRank } from './types';
+import { cellKey, type HexCell, type UnitRank } from './types';
 
-export const HEX_SIZE = 48; // was 32; figurines stay at previous world pixel size
+export const HEX_SIZE = 48;
 const MIN_SCALE = 0.35;
 const MAX_SCALE = 3.2;
-/** Prefer ~1.5× larger hexes on screen vs full-fit (pan/zoom to explore). */
 const FIT_ZOOM_BOOST = 1.5;
+const HEX_R = HEX_SIZE - 0.8;
+
+/** Precomputed flat-top hex corner offsets. */
+const HEX_OX: number[] = [];
+const HEX_OY: number[] = [];
+for (let i = 0; i < 6; i++) {
+  const a = (Math.PI / 180) * (60 * i);
+  HEX_OX.push(HEX_R * Math.cos(a));
+  HEX_OY.push(HEX_R * Math.sin(a));
+}
 
 export class Renderer {
   canvas: HTMLCanvasElement;
@@ -15,13 +24,22 @@ export class Renderer {
   offsetX = 0;
   offsetY = 0;
   scale = 1;
+  /** Cheap draw path while panning / zooming. */
+  fastMode = false;
   private fitScale = 1;
   private mapCenterX = 0;
   private mapCenterY = 0;
+  private sortedCells: HexCell[] = [];
+  private cellCount = -1;
+  private posX = new Float32Array(0);
+  private posY = new Float32Array(0);
+  private ownerColors = new Map<number, string>();
+  private moveHighlightSig = '';
+  private moveHighlightKeys: string[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    const ctx = canvas.getContext('2d', { alpha: false });
+    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
     if (!ctx) throw new Error('2D context unavailable');
     this.ctx = ctx;
   }
@@ -30,25 +48,28 @@ export class Renderer {
     const parent = this.canvas.parentElement;
     const w = parent?.clientWidth ?? window.innerWidth;
     const h = parent?.clientHeight ?? window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    // Cap DPR — high-DPI full redraws are a major freeze source
+    const dprCap = this.fastMode ? 1 : 1.25;
+    const dpr = Math.min(window.devicePixelRatio || 1, dprCap);
     this.canvas.width = Math.floor(w * dpr);
     this.canvas.height = Math.floor(h * dpr);
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.ctx.imageSmoothingEnabled = true;
-    this.ctx.imageSmoothingQuality = 'medium';
+    this.ctx.imageSmoothingEnabled = !this.fastMode;
+    this.ctx.imageSmoothingQuality = 'low';
   }
 
   centerOnMap(game: Game): void {
-    const keys = Object.keys(game.cells);
-    if (keys.length === 0) return;
+    this.refreshCellCache(game);
+    if (this.sortedCells.length === 0) return;
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
     let maxY = -Infinity;
-    for (const cell of Object.values(game.cells)) {
-      const { x, y } = hexToPixel(cell.q, cell.r, HEX_SIZE);
+    for (let i = 0; i < this.sortedCells.length; i++) {
+      const x = this.posX[i];
+      const y = this.posY[i];
       minX = Math.min(minX, x);
       maxX = Math.max(maxX, x);
       minY = Math.min(minY, y);
@@ -61,23 +82,19 @@ export class Renderer {
     this.mapCenterX = (minX + maxX) / 2;
     this.mapCenterY = (minY + maxY) / 2;
     this.fitScale = Math.min(w / mapW, h / mapH) * 0.94;
-    // Boost zoom so hexes read ~1.5× larger; figurines keep prior world size
     this.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.fitScale * FIT_ZOOM_BOOST));
     this.offsetX = w / 2 - this.mapCenterX * this.scale;
     this.offsetY = h / 2 - this.mapCenterY * this.scale;
   }
 
-  /** Zoom toward a screen point (canvas CSS pixels). */
   zoomAt(sx: number, sy: number, factor: number): void {
     const worldX = (sx - this.offsetX) / this.scale;
     const worldY = (sy - this.offsetY) / this.scale;
-    const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.scale * factor));
-    this.scale = next;
+    this.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.scale * factor));
     this.offsetX = sx - worldX * this.scale;
     this.offsetY = sy - worldY * this.scale;
   }
 
-  /** Pan map by screen-pixel delta. */
   panBy(dx: number, dy: number): void {
     this.offsetX += dx;
     this.offsetY += dy;
@@ -89,13 +106,42 @@ export class Renderer {
     return pixelToHex(x, y, HEX_SIZE);
   }
 
+  private refreshCellCache(game: Game): void {
+    const keys = Object.keys(game.cells);
+    if (keys.length === this.cellCount && this.sortedCells.length === keys.length) return;
+    this.sortedCells = Object.values(game.cells).sort((a, b) => a.r - b.r || a.q - b.q);
+    this.cellCount = keys.length;
+    this.posX = new Float32Array(this.sortedCells.length);
+    this.posY = new Float32Array(this.sortedCells.length);
+    for (let i = 0; i < this.sortedCells.length; i++) {
+      const c = this.sortedCells[i];
+      const p = hexToPixel(c.q, c.r, HEX_SIZE);
+      this.posX[i] = p.x;
+      this.posY[i] = p.y;
+    }
+  }
+
+  private refreshOwnerColors(game: Game): void {
+    if (this.ownerColors.size === game.players.length) {
+      let ok = true;
+      for (const p of game.players) {
+        if (this.ownerColors.get(p.id) !== p.color) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return;
+    }
+    this.ownerColors.clear();
+    for (const p of game.players) this.ownerColors.set(p.id, p.color);
+  }
+
   draw(game: Game): void {
     const ctx = this.ctx;
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
-    const detail = this.scale >= 1.05;
-    const useLod = this.scale < 1.15;
-    const compact = this.scale < 1.4;
+    const fast = this.fastMode;
+    const useLod = fast || this.scale < 1.25;
 
     ctx.fillStyle = '#1a4550';
     ctx.fillRect(0, 0, w, h);
@@ -104,110 +150,87 @@ export class Renderer {
     ctx.translate(this.offsetX, this.offsetY);
     ctx.scale(this.scale, this.scale);
 
-    const highlights = this.computeHighlights(game);
-    const colorByOwner = new Map<number, string>();
-    for (const p of game.players) colorByOwner.set(p.id, p.color);
+    this.refreshCellCache(game);
+    this.refreshOwnerColors(game);
 
-    // Viewport culling in world space
-    const margin = HEX_SIZE * 2.2;
+    const highlights = fast ? null : this.computeHighlights(game);
+    const hoverKey = game.ui.hoverKey;
+    const selectedKey = game.ui.selectedKey;
+
+    const margin = HEX_SIZE * 2;
     const minX = (-this.offsetX) / this.scale - margin;
     const maxX = (w - this.offsetX) / this.scale + margin;
     const minY = (-this.offsetY) / this.scale - margin;
     const maxY = (h - this.offsetY) / this.scale + margin;
 
-    const cells = Object.values(game.cells).sort((a, b) => a.r - b.r || a.q - b.q);
-
-    for (const cell of cells) {
-      const { x, y } = hexToPixel(cell.q, cell.r, HEX_SIZE);
+    const cells = this.sortedCells;
+    for (let i = 0; i < cells.length; i++) {
+      const x = this.posX[i];
+      const y = this.posY[i];
       if (x < minX || x > maxX || y < minY || y > maxY) continue;
 
+      const cell = cells[i];
       const key = cellKey(cell.q, cell.r);
-      const base = cell.owner === 0 ? '#6d8072' : (colorByOwner.get(cell.owner) ?? '#6d8072');
-      const corners = hexCorners(x, y, HEX_SIZE - 0.8);
+      const base = cell.owner === 0 ? '#6d8072' : (this.ownerColors.get(cell.owner) ?? '#6d8072');
 
-      if (detail) {
-        ctx.fillStyle = 'rgba(0,0,0,0.14)';
-        ctx.beginPath();
-        ctx.ellipse(x, y + HEX_SIZE * 0.55, HEX_SIZE * 0.72, HEX_SIZE * 0.28, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      ctx.beginPath();
-      ctx.moveTo(corners[0].x, corners[0].y);
-      for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
-      ctx.closePath();
-
-      if (detail && cell.owner !== 0) {
-        const g = ctx.createLinearGradient(x - HEX_SIZE, y - HEX_SIZE, x + HEX_SIZE, y + HEX_SIZE);
-        g.addColorStop(0, shadeHex(base, 28));
-        g.addColorStop(0.55, base);
-        g.addColorStop(1, shadeHex(base, -22));
-        ctx.fillStyle = g;
-        ctx.globalAlpha = 0.94;
-      } else if (detail) {
-        const g = ctx.createLinearGradient(x, y - HEX_SIZE, x, y + HEX_SIZE);
-        g.addColorStop(0, '#7a8f80');
-        g.addColorStop(1, '#55695c');
-        ctx.fillStyle = g;
-        ctx.globalAlpha = 0.92;
-      } else {
-        ctx.fillStyle = base;
-        ctx.globalAlpha = cell.owner === 0 ? 0.9 : 0.94;
-      }
+      pathHex(ctx, x, y);
+      ctx.fillStyle = base;
+      ctx.globalAlpha = cell.owner === 0 ? 0.88 : 0.94;
       ctx.fill();
       ctx.globalAlpha = 1;
-
-      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = fast ? 0.9 : 1.15;
       ctx.stroke();
 
-      if (detail) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-        ctx.lineWidth = 1.1;
-        ctx.beginPath();
-        ctx.moveTo(corners[5].x, corners[5].y);
-        ctx.lineTo(corners[0].x, corners[0].y);
-        ctx.lineTo(corners[1].x, corners[1].y);
-        ctx.stroke();
-      }
-
-      if (highlights.has(key)) {
-        ctx.beginPath();
-        ctx.moveTo(corners[0].x, corners[0].y);
-        for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
-        ctx.closePath();
+      if (!fast && highlights?.has(key)) {
+        pathHex(ctx, x, y);
         ctx.fillStyle = highlights.get(key)!;
-        ctx.globalAlpha = 0.32;
+        ctx.globalAlpha = 0.3;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (fast && (key === hoverKey || key === selectedKey)) {
+        pathHex(ctx, x, y);
+        ctx.fillStyle = key === selectedKey ? '#fff6c2' : '#a5d8ff';
+        ctx.globalAlpha = 0.28;
         ctx.fill();
         ctx.globalAlpha = 1;
       }
 
-      if (game.ui.selectedKey === key) {
-        ctx.beginPath();
-        ctx.moveTo(corners[0].x, corners[0].y);
-        for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
-        ctx.closePath();
+      if (!fast && selectedKey === key) {
+        pathHex(ctx, x, y);
         ctx.strokeStyle = '#fff6c2';
-        ctx.lineWidth = 2.8;
+        ctx.lineWidth = 2.6;
         ctx.stroke();
       }
 
       if (cell.tree) {
-        drawTree3d(ctx, x, y, cell.palm);
+        if (fast) {
+          ctx.fillStyle = '#2f9e44';
+          ctx.fillRect(x - 3, y - 6, 6, 10);
+        } else {
+          drawTreeSimple(ctx, x, y);
+        }
       }
 
       if (cell.building) {
-        drawBuildingFigurine(ctx, x, y - 2, cell.building, cell.training?.turnsLeft ?? null);
+        if (fast) {
+          ctx.fillStyle = '#e9ecef';
+          ctx.fillRect(x - 6, y - 10, 12, 12);
+          ctx.fillStyle = '#495057';
+          ctx.fillRect(x - 3, y - 14, 6, 5);
+        } else {
+          drawBuildingFigurine(ctx, x, y - 2, cell.building, cell.training?.turnsLeft ?? null);
+        }
       }
 
       if (cell.unit) {
-        const team = colorByOwner.get(cell.unit.owner) ?? '#212529';
+        const team = this.ownerColors.get(cell.unit.owner) ?? '#212529';
         const uy = cell.building ? y + 10 : y + 3;
         const rank = cell.unit.rank as UnitRank;
         if (useLod) {
           drawUnitLod(ctx, x, uy, rank, cell.unit.moved, team);
         } else {
-          drawUnitFigurine(ctx, x, uy, rank, cell.unit.moved, team, { compact });
+          drawUnitFigurine(ctx, x, uy, rank, cell.unit.moved, team);
         }
       }
     }
@@ -217,61 +240,35 @@ export class Renderer {
 
   private computeHighlights(game: Game): Map<string, string> {
     const map = new Map<string, string>();
-    if (game.ui.mode === 'unit' && game.ui.selectedKey) {
-      for (const k of game.moveTargets(game.ui.selectedKey)) map.set(k, '#ffd43b');
+    const sig = `${game.ui.mode}:${game.ui.selectedKey ?? ''}`;
+    if (sig !== this.moveHighlightSig) {
+      this.moveHighlightSig = sig;
+      this.moveHighlightKeys = [];
+      if (game.ui.mode === 'unit' && game.ui.selectedKey) {
+        this.moveHighlightKeys = [...game.moveTargets(game.ui.selectedKey)];
+      } else if (game.ui.mode.startsWith('build')) {
+        this.moveHighlightKeys = [...game.buildTargets(game.ui.mode)];
+      }
     }
-    if (game.ui.mode.startsWith('build')) {
-      for (const k of game.buildTargets(game.ui.mode)) map.set(k, '#69db7c');
-    }
+    const color = game.ui.mode.startsWith('build') ? '#69db7c' : '#ffd43b';
+    for (const k of this.moveHighlightKeys) map.set(k, color);
     if (game.ui.hoverKey) map.set(game.ui.hoverKey, '#a5d8ff');
     return map;
   }
 }
 
-function shadeHex(hex: string, amt: number): string {
-  const raw = hex.replace('#', '');
-  const full =
-    raw.length === 3
-      ? raw
-          .split('')
-          .map((c) => c + c)
-          .join('')
-      : raw;
-  const num = parseInt(full, 16);
-  if (Number.isNaN(num)) return hex;
-  const r = Math.min(255, Math.max(0, ((num >> 16) & 255) + amt));
-  const g = Math.min(255, Math.max(0, ((num >> 8) & 255) + amt));
-  const b = Math.min(255, Math.max(0, (num & 255) + amt));
-  return `rgb(${r},${g},${b})`;
+function pathHex(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + HEX_OX[0], y + HEX_OY[0]);
+  for (let i = 1; i < 6; i++) ctx.lineTo(x + HEX_OX[i], y + HEX_OY[i]);
+  ctx.closePath();
 }
 
-function drawTree3d(ctx: CanvasRenderingContext2D, x: number, y: number, palm: boolean): void {
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx.beginPath();
-  ctx.ellipse(x, y + 6, 6, 2.2, 0, 0, Math.PI * 2);
-  ctx.fill();
+function drawTreeSimple(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.fillStyle = '#6b4226';
-  ctx.fillRect(x - 1.4, y - 2, 2.8, 8);
-  if (palm) {
-    ctx.fillStyle = '#2b8a3e';
-    for (const a of [-0.8, -0.2, 0.4, 1]) {
-      ctx.beginPath();
-      ctx.ellipse(x + Math.cos(a) * 5, y - 6 + Math.sin(a), 5, 2, a, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else {
-    const g = ctx.createRadialGradient(x - 2, y - 8, 1, x, y - 4, 9);
-    g.addColorStop(0, '#51cf66');
-    g.addColorStop(1, '#1b4332');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y - 5, 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x - 4, y - 2, 5.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x + 4, y - 2, 5.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  ctx.fillRect(x - 1.2, y - 1, 2.4, 7);
+  ctx.fillStyle = '#2b8a3e';
+  ctx.beginPath();
+  ctx.arc(x, y - 5, 7, 0, Math.PI * 2);
+  ctx.fill();
 }
