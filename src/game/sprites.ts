@@ -322,7 +322,6 @@ const spriteState: Record<UnitSpriteId, SpriteState> = {
 
 const defenseSpriteState: Record<DefenseSpriteId, SpriteState> = {
   firepoint: { img: null, failed: false },
-  firepointSoldier: { img: null, failed: false },
   defenseLine: { img: null, failed: false },
 };
 
@@ -476,7 +475,7 @@ export function drawBuildingFigurine(
   ctx.imageSmoothingQuality = 'medium';
   if (kind === 'castle') drawCapital(ctx, x, y);
   else if (kind === 'farm') drawFarm(ctx, x, y);
-  else if (kind === 'tower') drawFirepoint(ctx, x, y);
+  else if (kind === 'tower') drawDefensePhoto(ctx, x, y, 'firepoint', false);
   else if (kind === 'strongTower') drawDefensePhoto(ctx, x, y, 'defenseLine', true);
   else if (isHouseBuilding(kind)) {
     const rank = houseRankFromKind(kind)!;
@@ -673,48 +672,7 @@ function drawFarm(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   drawLine(ctx, x + 10, y + 4.5, x + 12, y + 4.5, '#8b6914', 1);
 }
 
-/** Огневая точка — 3 лежачих солдата сверху, размер как у обычных юнитов. */
-function drawFirepoint(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  const unitSize = 26; // same as drawMilitia / drawSoldier
-  const img = getDefenseSprite('firepointSoldier');
-  shadow(ctx, x, y + 10, 16, 5, 0.32);
-  // Tight top-down cluster (offsets in hex-local pixels)
-  const offsets: Array<[number, number]> = [
-    [-9, -7],
-    [9, -5],
-    [0, 7],
-  ];
-  if (img) {
-    for (const [dx, dy] of offsets) {
-      ctx.drawImage(
-        img,
-        x + dx - unitSize / 2,
-        y + dy - unitSize * 0.55,
-        unitSize,
-        unitSize,
-      );
-    }
-  } else {
-    const fallback = getDefenseSprite('firepoint');
-    if (fallback) {
-      const size = 52;
-      ctx.drawImage(fallback, x - size / 2, y - size * 0.55, size, size);
-    } else {
-      drawTower(ctx, x, y, false);
-      return;
-    }
-  }
-  const prot = BUILDING_PROTECTION.tower;
-  ctx.font = 'bold 10px Outfit, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-  ctx.strokeText(String(prot), x, y + 12);
-  ctx.fillStyle = '#fff';
-  ctx.fillText(String(prot), x, y + 12);
-}
-
+/** Огневая точка / оборонительная линия — isometric photo sprites. */
 function drawDefensePhoto(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -722,11 +680,12 @@ function drawDefensePhoto(
   id: DefenseSpriteId,
   strong: boolean,
 ): void {
-  const size = strong ? 36 : 32;
-  shadow(ctx, x, y + 10, size * 0.38, size * 0.12, 0.34);
+  // Larger isometric portraits (firepoint group bigger than MG nest)
+  const size = strong ? 42 : 52;
+  shadow(ctx, x, y + 11, size * 0.4, size * 0.13, 0.34);
   const img = getDefenseSprite(id);
   if (img) {
-    ctx.drawImage(img, x - size / 2, y - size * 0.55, size, size);
+    ctx.drawImage(img, x - size / 2, y - size * 0.58, size, size);
   } else {
     drawTower(ctx, x, y, strong);
     return;
@@ -737,9 +696,9 @@ function drawDefensePhoto(
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 3;
   ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-  ctx.strokeText(String(prot), x, y + 8);
+  ctx.strokeText(String(prot), x, y + 10);
   ctx.fillStyle = '#fff';
-  ctx.fillText(String(prot), x, y + 8);
+  ctx.fillText(String(prot), x, y + 10);
 }
 
 function drawTower(ctx: CanvasRenderingContext2D, x: number, y: number, strong: boolean): void {
