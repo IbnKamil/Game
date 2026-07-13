@@ -291,7 +291,15 @@ export function drawUnitLod(
 
 
 type UnitSpriteId = 'militia' | 'soldier' | 'specops' | 'guntruck' | 't90';
-type DefenseSpriteId = 'firepoint' | 'defenseLine';
+type BuildingSpriteId =
+  | 'castle'
+  | 'farm'
+  | 'tower'
+  | 'strongTower'
+  | 'house1'
+  | 'house2'
+  | 'house3'
+  | 'house4';
 
 const UNIT_SPRITE_SRC: Record<UnitSpriteId, string> = {
   militia: '/militia.png',
@@ -301,9 +309,27 @@ const UNIT_SPRITE_SRC: Record<UnitSpriteId, string> = {
   t90: '/t90-tank.png',
 };
 
-const DEFENSE_SPRITE_SRC: Record<DefenseSpriteId, string> = {
-  firepoint: '/firepoint.png',
-  defenseLine: '/defense-line.png',
+const BUILDING_SPRITE_SRC: Record<BuildingSpriteId, string> = {
+  castle: '/castle.png',
+  farm: '/farm.png',
+  tower: '/firepoint.png',
+  strongTower: '/defense-line.png',
+  house1: '/house1.png',
+  house2: '/house2.png',
+  house3: '/house3.png',
+  house4: '/house4.png',
+};
+
+/** Map draw size for isometric building portraits. */
+const BUILDING_DRAW_SIZE: Record<BuildingSpriteId, number> = {
+  castle: 44,
+  farm: 40,
+  tower: 47, // ~10% smaller than previous 52
+  strongTower: 42,
+  house1: 40,
+  house2: 42,
+  house3: 44,
+  house4: 46,
 };
 
 interface SpriteState {
@@ -319,9 +345,15 @@ const spriteState: Record<UnitSpriteId, SpriteState> = {
   t90: { img: null, failed: false },
 };
 
-const defenseSpriteState: Record<DefenseSpriteId, SpriteState> = {
-  firepoint: { img: null, failed: false },
-  defenseLine: { img: null, failed: false },
+const buildingSpriteState: Record<BuildingSpriteId, SpriteState> = {
+  castle: { img: null, failed: false },
+  farm: { img: null, failed: false },
+  tower: { img: null, failed: false },
+  strongTower: { img: null, failed: false },
+  house1: { img: null, failed: false },
+  house2: { img: null, failed: false },
+  house3: { img: null, failed: false },
+  house4: { img: null, failed: false },
 };
 
 const unitSpriteReadyListeners: Array<() => void> = [];
@@ -338,12 +370,12 @@ function allSpritesSettled(): boolean {
     if (s.failed) return true;
     return !!s.img && s.img.complete && s.img.naturalWidth > 0;
   });
-  const defOk = (Object.keys(DEFENSE_SPRITE_SRC) as DefenseSpriteId[]).every((id) => {
-    const s = defenseSpriteState[id];
+  const buildingsOk = (Object.keys(BUILDING_SPRITE_SRC) as BuildingSpriteId[]).every((id) => {
+    const s = buildingSpriteState[id];
     if (s.failed) return true;
     return !!s.img && s.img.complete && s.img.naturalWidth > 0;
   });
-  return unitsOk && defOk;
+  return unitsOk && buildingsOk;
 }
 
 function loadSprite(
@@ -372,14 +404,14 @@ function getUnitSprite(id: UnitSpriteId): HTMLImageElement | null {
   return loadSprite(spriteState[id], UNIT_SPRITE_SRC[id]);
 }
 
-function getDefenseSprite(id: DefenseSpriteId): HTMLImageElement | null {
-  return loadSprite(defenseSpriteState[id], DEFENSE_SPRITE_SRC[id]);
+function getBuildingSprite(id: BuildingSpriteId): HTMLImageElement | null {
+  return loadSprite(buildingSpriteState[id], BUILDING_SPRITE_SRC[id]);
 }
 
-/** Start loading unit/defense photo sprites; `onReady` fires when all have loaded (or failed). */
+/** Start loading unit/building photo sprites; `onReady` fires when all have loaded (or failed). */
 export function preloadUnitSprites(onReady?: () => void): void {
   for (const id of Object.keys(UNIT_SPRITE_SRC) as UnitSpriteId[]) getUnitSprite(id);
-  for (const id of Object.keys(DEFENSE_SPRITE_SRC) as DefenseSpriteId[]) getDefenseSprite(id);
+  for (const id of Object.keys(BUILDING_SPRITE_SRC) as BuildingSpriteId[]) getBuildingSprite(id);
   if (!onReady) return;
   if (allSpritesSettled()) onReady();
   else unitSpriteReadyListeners.push(onReady);
@@ -473,18 +505,52 @@ export function drawBuildingFigurine(
   ctx.save();
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'medium';
-  if (kind === 'castle') drawCapital(ctx, x, y);
-  else if (kind === 'farm') drawFarm(ctx, x, y);
-  else if (kind === 'tower') drawDefensePhoto(ctx, x, y, 'firepoint', false);
-  else if (kind === 'strongTower') drawDefensePhoto(ctx, x, y, 'defenseLine', true);
-  else if (isHouseBuilding(kind)) {
-    const rank = houseRankFromKind(kind)!;
-    if (rank === 1) drawCottage(ctx, x, y, trainLeft);
-    else if (rank === 2) drawBarracksBuilding(ctx, x, y, trainLeft);
-    else if (rank === 3) drawHeadquarters(ctx, x, y, trainLeft);
-    else drawMilitaryFactory(ctx, x, y, trainLeft);
+  if (!drawBuildingPhoto(ctx, x, y, kind as BuildingSpriteId, trainLeft)) {
+    // Geometric fallbacks if photo sprites are still loading / missing
+    if (kind === 'castle') drawCapital(ctx, x, y);
+    else if (kind === 'farm') drawFarm(ctx, x, y);
+    else if (kind === 'tower') drawTower(ctx, x, y, false);
+    else if (kind === 'strongTower') drawTower(ctx, x, y, true);
+    else if (isHouseBuilding(kind)) {
+      const rank = houseRankFromKind(kind)!;
+      if (rank === 1) drawCottage(ctx, x, y, trainLeft);
+      else if (rank === 2) drawBarracksBuilding(ctx, x, y, trainLeft);
+      else if (rank === 3) drawHeadquarters(ctx, x, y, trainLeft);
+      else drawMilitaryFactory(ctx, x, y, trainLeft);
+    }
   }
   ctx.restore();
+}
+
+function drawBuildingPhoto(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  id: BuildingSpriteId,
+  trainLeft: number | null,
+): boolean {
+  const img = getBuildingSprite(id);
+  if (!img) return false;
+  const size = BUILDING_DRAW_SIZE[id];
+  shadow(ctx, x, y + 11, size * 0.4, size * 0.13, 0.34);
+  ctx.drawImage(img, x - size / 2, y - size * 0.58, size, size);
+
+  if (id === 'tower' || id === 'strongTower') {
+    const prot = BUILDING_PROTECTION[id];
+    ctx.font = 'bold 10px Outfit, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    ctx.strokeText(String(prot), x, y + 10);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(String(prot), x, y + 10);
+  }
+
+  if (isHouseBuilding(id) && trainLeft !== null) {
+    drawTrainBadge(ctx, x + size * 0.32, y - size * 0.42, trainLeft);
+  }
+  return true;
 }
 
 function drawCapital(ctx: CanvasRenderingContext2D, x: number, y: number): void {
@@ -670,35 +736,6 @@ function drawFarm(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   }
   drawLine(ctx, x - 12, y + 4.5, x - 10, y + 4.5, '#8b6914', 1);
   drawLine(ctx, x + 10, y + 4.5, x + 12, y + 4.5, '#8b6914', 1);
-}
-
-/** Огневая точка / оборонительная линия — isometric photo sprites. */
-function drawDefensePhoto(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  id: DefenseSpriteId,
-  strong: boolean,
-): void {
-  // Larger isometric portraits (firepoint group bigger than MG nest)
-  const size = strong ? 42 : 52;
-  shadow(ctx, x, y + 11, size * 0.4, size * 0.13, 0.34);
-  const img = getDefenseSprite(id);
-  if (img) {
-    ctx.drawImage(img, x - size / 2, y - size * 0.58, size, size);
-  } else {
-    drawTower(ctx, x, y, strong);
-    return;
-  }
-  const prot = BUILDING_PROTECTION[strong ? 'strongTower' : 'tower'];
-  ctx.font = 'bold 10px Outfit, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-  ctx.strokeText(String(prot), x, y + 10);
-  ctx.fillStyle = '#fff';
-  ctx.fillText(String(prot), x, y + 10);
 }
 
 function drawTower(ctx: CanvasRenderingContext2D, x: number, y: number, strong: boolean): void {

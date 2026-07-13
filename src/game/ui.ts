@@ -142,7 +142,13 @@ export function mountHud(root: HTMLElement): {
       if (human) {
         const fc = farmCost(game.cells, prov);
         html += `<h3>Постройки</h3><div class="btn-grid">`;
-        html += btn('build:buildFarm', `[1] Ферма (${fc})`, prov.money >= fc);
+        html += buildIconBtn(
+          'build:buildFarm',
+          `/farm-icon.png`,
+          `[1] Ферма`,
+          fc,
+          prov.money >= fc,
+        );
         html += buildIconBtn(
           'build:buildTower',
           `/firepoint-icon.png`,
@@ -159,9 +165,11 @@ export function mountHud(root: HTMLElement): {
         );
         html += `</div><h3>Здания призыва</h3><div class="btn-grid">`;
         for (const r of [1, 2, 3, 4] as const) {
-          html += btn(
+          html += buildIconBtn(
             `build:buildHouse${r}`,
-            `[${r + 3}] ${RECRUIT_LABEL[r]} (${HOUSE_COST[r]})`,
+            `/house${r}-icon.png`,
+            `[${r + 3}] ${RECRUIT_LABEL[r]}`,
+            HOUSE_COST[r],
             prov.money >= HOUSE_COST[r],
           );
         }
@@ -271,10 +279,6 @@ export function mountHud(root: HTMLElement): {
       Object.assign(handlers, h);
     },
   };
-}
-
-function btn(act: string, label: string, enabled: boolean): string {
-  return `<button type="button" data-act="${act}" ${enabled ? '' : 'disabled'}>${label}</button>`;
 }
 
 function buildIconBtn(
