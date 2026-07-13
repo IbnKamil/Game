@@ -69,6 +69,12 @@ describe('Start menu config', () => {
     expect(g.players[2].isHuman).toBe(false);
     expect(g.config.aiDifficulty).toBe('hard');
   });
+
+  it('maps Гигантская size to 3× Огромная radius', () => {
+    const state = defaultMenuState();
+    state.mapSize = 'giant';
+    expect(menuToConfig(state).mapRadius).toBe(45);
+  });
 });
 
 describe('Barracks houses', () => {
