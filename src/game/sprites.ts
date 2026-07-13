@@ -291,7 +291,7 @@ export function drawUnitLod(
 
 
 type UnitSpriteId = 'militia' | 'soldier' | 'specops' | 'guntruck' | 't90';
-type DefenseSpriteId = 'firepoint' | 'firepointSoldier' | 'defenseLine';
+type DefenseSpriteId = 'firepoint' | 'defenseLine';
 
 const UNIT_SPRITE_SRC: Record<UnitSpriteId, string> = {
   militia: '/militia.png',
@@ -303,7 +303,6 @@ const UNIT_SPRITE_SRC: Record<UnitSpriteId, string> = {
 
 const DEFENSE_SPRITE_SRC: Record<DefenseSpriteId, string> = {
   firepoint: '/firepoint.png',
-  firepointSoldier: '/firepoint-soldier.png',
   defenseLine: '/defense-line.png',
 };
 
@@ -348,9 +347,10 @@ function allSpritesSettled(): boolean {
 }
 
 function loadSprite(
-  state: SpriteState,
+  state: SpriteState | undefined,
   src: string,
 ): HTMLImageElement | null {
+  if (!state) return null;
   if (state.failed) return null;
   if (typeof Image === 'undefined') return null;
   if (!state.img) {
