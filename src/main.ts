@@ -1,3 +1,8 @@
+import '@fontsource/outfit/400.css';
+import '@fontsource/outfit/600.css';
+import '@fontsource/outfit/700.css';
+import '@fontsource/source-serif-4/600.css';
+import '@fontsource/source-serif-4/700.css';
 import './style.css';
 import { runAiTurn } from './game/ai';
 import { Game } from './game/Game';
