@@ -307,13 +307,107 @@ function drawSoldierSquad(
   drawGroup(ctx, x, y, 10, teamColor, compact ? drawSoldierSimple : drawSoldier, scale);
 }
 
+type UnitSpriteId = 'militia' | 'soldier' | 'specops' | 'guntruck' | 't90';
+
+const UNIT_SPRITE_SRC: Record<UnitSpriteId, string> = {
+  militia: '/militia.png',
+  soldier: '/soldier.png',
+  specops: '/specops.png',
+  guntruck: '/guntruck.png',
+  t90: '/t90-tank.png',
+};
+
+interface SpriteState {
+  img: HTMLImageElement | null;
+  failed: boolean;
+}
+
+const spriteState: Record<UnitSpriteId, SpriteState> = {
+  militia: { img: null, failed: false },
+  soldier: { img: null, failed: false },
+  specops: { img: null, failed: false },
+  guntruck: { img: null, failed: false },
+  t90: { img: null, failed: false },
+};
+
+const unitSpriteReadyListeners: Array<() => void> = [];
+
+function notifyUnitSpritesMaybeReady(): void {
+  if (!allUnitSpritesSettled()) return;
+  const listeners = unitSpriteReadyListeners.splice(0);
+  for (const fn of listeners) fn();
+}
+
+function allUnitSpritesSettled(): boolean {
+  return (Object.keys(UNIT_SPRITE_SRC) as UnitSpriteId[]).every((id) => {
+    const s = spriteState[id];
+    if (s.failed) return true;
+    return !!s.img && s.img.complete && s.img.naturalWidth > 0;
+  });
+}
+
+function getUnitSprite(id: UnitSpriteId): HTMLImageElement | null {
+  const s = spriteState[id];
+  if (s.failed) return null;
+  if (typeof Image === 'undefined') return null;
+  if (!s.img) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => notifyUnitSpritesMaybeReady();
+    img.onerror = () => {
+      s.failed = true;
+      notifyUnitSpritesMaybeReady();
+    };
+    img.src = UNIT_SPRITE_SRC[id];
+    s.img = img;
+  }
+  if (s.img.complete && s.img.naturalWidth > 0) return s.img;
+  return null;
+}
+
+/** Start loading unit photo sprites; `onReady` fires when all have loaded (or failed). */
+export function preloadUnitSprites(onReady?: () => void): void {
+  for (const id of Object.keys(UNIT_SPRITE_SRC) as UnitSpriteId[]) getUnitSprite(id);
+  if (!onReady) return;
+  if (allUnitSpritesSettled()) onReady();
+  else unitSpriteReadyListeners.push(onReady);
+}
+
+function drawTeamMark(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string, w = 6): void {
+  ctx.fillStyle = teamColor;
+  ctx.fillRect(x - w / 2, y, w, 2.4);
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+  ctx.lineWidth = 0.6;
+  ctx.strokeRect(x - w / 2, y, w, 2.4);
+}
+
+function drawPhotoUnit(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  id: UnitSpriteId,
+  size: number,
+  teamColor: string,
+  opts: { shadowRx?: number; shadowRy?: number; markY?: number; markW?: number } = {},
+): void {
+  const shadowRx = opts.shadowRx ?? size * 0.28;
+  const shadowRy = opts.shadowRy ?? size * 0.1;
+  shadow(ctx, x, y + size * 0.34, shadowRx, shadowRy, 0.32);
+  const img = getUnitSprite(id);
+  if (img) {
+    ctx.drawImage(img, x - size / 2, y - size * 0.58, size, size);
+    drawTeamMark(ctx, x, opts.markY ?? y + size * 0.3, teamColor, opts.markW ?? Math.max(5, size * 0.22));
+  } else {
+    // Compact geometric fallback until the photo loads
+    isoBox(ctx, x - 1.4, y + 5, 2.2, 2, 3, '#495057');
+    isoBox(ctx, x + 1.4, y + 5, 2.2, 2, 3, '#495057');
+    isoBox(ctx, x, y + 0.5, 6, 4, 8, teamColor);
+    isoCylinder(ctx, x, y - 7, 2.5, 1.5, 3, '#e8c39e');
+  }
+}
+
 function drawSoldierSimple(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
-  shadow(ctx, x, y + 7, 4, 1.6, 0.25);
-  isoBox(ctx, x - 1.4, y + 5, 2.2, 2, 3, '#111');
-  isoBox(ctx, x + 1.4, y + 5, 2.2, 2, 3, '#111');
-  isoBox(ctx, x, y + 0.5, 6, 4, 7, teamColor);
-  isoCylinder(ctx, x, y - 6.5, 2.6, 1.5, 3, '#2f3e2f');
-  isoBox(ctx, x + 4, y - 0.5, 6, 1.4, 1.3, '#222');
+  drawPhotoUnit(ctx, x, y, 'soldier', 20, teamColor, { markY: y + 7 });
 }
 
 function drawSpecOpsSquad(
@@ -322,318 +416,55 @@ function drawSpecOpsSquad(
   y: number,
   teamColor: string,
 ): void {
-  drawGunTruck(ctx, x + 2, y + 2, teamColor);
+  drawGunTruck(ctx, x + 3, y + 3, teamColor);
   const offs = [
-    { dx: -11, dy: -1 },
-    { dx: -3, dy: -4 },
-    { dx: 6, dy: -2 },
+    { dx: -12, dy: -1 },
+    { dx: -2, dy: -4 },
+    { dx: 8, dy: -1 },
   ];
   for (const o of offs.sort((a, b) => a.dy - b.dy)) {
     drawSpecOps(ctx, x + o.dx, y + o.dy, teamColor);
   }
 }
 
-/** Technical / pickup with mounted machine gun. */
 function drawGunTruck(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
-  shadow(ctx, x, y + 8, 14, 4, 0.32);
-  for (const wx of [-7, -2, 5, 10]) {
-    isoCylinder(ctx, x + wx, y + 6.5, 2.2, 1.3, 2.8, '#495057');
-    ctx.fillStyle = '#adb5bd';
-    ctx.beginPath();
-    ctx.arc(x + wx, y + 4.2, 0.7, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  isoBox(ctx, x + 1, y + 4, 20, 9, 3.5, '#868e96');
-  isoBox(ctx, x - 5, y + 1, 8, 8, 6, shade(teamColor, -25));
-  isoBox(ctx, x - 5, y - 3.5, 7, 6, 2.5, '#74c0fc');
-  ctx.fillStyle = 'rgba(116,192,252,0.35)';
-  ctx.fillRect(x - 6.5, y - 5, 3, 1.5);
-  isoBox(ctx, x + 6, y + 2.5, 12, 8, 3.2, shade(teamColor, -40));
-  for (const dx of [2, 5, 8]) {
-    isoBox(ctx, x + dx, y + 1, 2.8, 2.2, 1.8, '#c2a878');
-  }
-  isoCylinder(ctx, x + 6, y - 0.5, 2.4, 1.4, 2.2, '#6c757d');
-  isoBox(ctx, x + 6, y - 2, 2, 2, 3, '#495057');
-  isoBox(ctx, x + 10, y - 3.5, 9, 1.6, 1.5, '#6c757d');
-  isoBox(ctx, x + 14, y - 4.5, 1.4, 1.4, 2, '#495057');
-  isoBox(ctx, x + 4, y - 1, 2.5, 2, 2, '#3d2914');
-  ctx.fillStyle = '#fff3bf';
-  ctx.beginPath();
-  ctx.arc(x - 8.5, y + 0.5, 1.1, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-/** Rank 1 — detailed militia with rifle. */
-function drawMilitia(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
-  shadow(ctx, x, y + 8.5, 5, 2, 0.32);
-
-  // Boots
-  isoBox(ctx, x - 1.6, y + 7.2, 2.6, 2.8, 2.2, '#1a1a1a');
-  isoBox(ctx, x + 1.6, y + 7.2, 2.6, 2.8, 2.2, '#1a1a1a');
-  // Legs / pants
-  isoBox(ctx, x - 1.5, y + 4.2, 2.4, 2.5, 4.2, '#4a5d4e');
-  isoBox(ctx, x + 1.5, y + 4.2, 2.4, 2.5, 4.2, '#4a5d4e');
-  // Belt
-  isoBox(ctx, x, y + 1.6, 6.2, 4.2, 1.3, '#3d2914');
-  ctx.fillStyle = '#c9a227';
-  ctx.fillRect(x - 0.7, y + 0.6, 1.4, 1.2);
-  // Torso jacket
-  isoBox(ctx, x, y + 0.2, 6.4, 4.6, 7.2, teamColor);
-  // Collar
-  isoBox(ctx, x, y - 6.5, 5.2, 3.5, 1.2, shade(teamColor, -25));
-  // Bandolier
-  drawLine(ctx, x - 2.6, y - 5.5, x + 2.8, y + 1.5, '#2b2118', 1.35);
-  for (let i = 0; i < 4; i++) {
-    const t = i / 3;
-    isoBox(ctx, x - 2.2 + t * 4.6, y - 5 + t * 6.2, 1.3, 1.1, 1.5, '#5c4033');
-  }
-  // Backpack
-  isoBox(ctx, x - 0.3, y - 1.5, 4.2, 2.2, 4.5, '#5c4033');
-  isoBox(ctx, x - 0.3, y - 5.5, 3.6, 1.8, 1.2, '#3d2914');
-  // Arms
-  isoBox(ctx, x - 3.6, y - 1, 2.2, 2.2, 4.5, teamColor);
-  isoBox(ctx, x + 3.4, y - 0.5, 2.2, 2.2, 3.8, teamColor);
-  // Hands
-  isoCylinder(ctx, x - 3.6, y + 3.2, 1.1, 0.7, 1.4, '#e8c39e');
-  isoCylinder(ctx, x + 4.2, y + 2.8, 1.1, 0.7, 1.4, '#e8c39e');
-  // Head
-  isoCylinder(ctx, x, y - 7.2, 2.55, 1.55, 3.6, '#f0c9a0');
-  // Ears
-  isoCylinder(ctx, x - 2.5, y - 8.5, 0.55, 0.4, 1.1, '#e8b892');
-  isoCylinder(ctx, x + 2.5, y - 8.5, 0.55, 0.4, 1.1, '#e8b892');
-  // Eyes
-  ctx.fillStyle = '#2b2b2b';
-  ctx.beginPath();
-  ctx.ellipse(x - 0.85, y - 9.2, 0.45, 0.35, 0, 0, Math.PI * 2);
-  ctx.ellipse(x + 0.85, y - 9.2, 0.45, 0.35, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Cap
-  isoBox(ctx, x, y - 10.6, 5.8, 4.2, 1.8, '#3d5a40');
-  isoBox(ctx, x + 1.8, y - 9.6, 3.2, 2.2, 0.7, '#2f4a34');
-  // Cap badge
-  ctx.fillStyle = '#ffd43b';
-  ctx.beginPath();
-  ctx.arc(x, y - 11.5, 0.9, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Detailed bolt-action rifle
-  drawRifle(ctx, x + 3.2, y - 1.2, teamColor);
-}
-
-function drawRifle(ctx: CanvasRenderingContext2D, x: number, y: number, _team: string): void {
-  // Stock
-  isoBox(ctx, x - 1.5, y + 1.5, 3.5, 1.6, 1.8, '#6b4226');
-  // Receiver
-  isoBox(ctx, x + 2.5, y + 0.6, 5, 1.5, 1.6, '#2b2b2b');
-  // Barrel
-  isoBox(ctx, x + 8.5, y - 0.2, 9, 1.1, 1.05, '#1a1a1a');
-  // Front sight
-  isoBox(ctx, x + 12.2, y - 1.4, 0.9, 0.9, 1.6, '#111');
-  // Rear sight
-  isoBox(ctx, x + 3.5, y - 1.1, 1.4, 1.1, 1.3, '#333');
-  // Bolt handle
-  isoBox(ctx, x + 2.2, y - 0.8, 1.2, 2.4, 0.7, '#444');
-  // Trigger guard
-  ctx.strokeStyle = '#222';
-  ctx.lineWidth = 0.9;
-  ctx.beginPath();
-  ctx.arc(x + 1.2, y + 2.2, 1.3, 0.15, Math.PI - 0.15);
-  ctx.stroke();
-  // Sling
-  drawLine(ctx, x - 2, y + 0.5, x + 7, y - 0.8, '#3d2914', 0.7);
-}
-
-/** Rank 2 — detailed modern soldier. */
-function drawSoldier(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
-  shadow(ctx, x, y + 9, 5.8, 2.2, 0.34);
-
-  // Combat boots
-  isoBox(ctx, x - 1.8, y + 7.6, 3, 3.2, 2.6, '#111');
-  isoBox(ctx, x + 1.8, y + 7.6, 3, 3.2, 2.6, '#111');
-  ctx.fillStyle = '#333';
-  ctx.fillRect(x - 2.6, y + 7.8, 1.6, 0.6);
-  ctx.fillRect(x + 1, y + 7.8, 1.6, 0.6);
-  // Pants + kneepads
-  isoBox(ctx, x - 1.7, y + 4.5, 2.8, 2.8, 4.5, shade(teamColor, -35));
-  isoBox(ctx, x + 1.7, y + 4.5, 2.8, 2.8, 4.5, shade(teamColor, -35));
-  isoBox(ctx, x - 1.7, y + 5.5, 3, 2.2, 1.6, '#2b2b2b');
-  isoBox(ctx, x + 1.7, y + 5.5, 3, 2.2, 1.6, '#2b2b2b');
-  // Torso
-  isoBox(ctx, x, y + 0.5, 7.4, 5.2, 8, teamColor);
-  // Plate carrier
-  isoBox(ctx, x, y - 0.5, 7.8, 5.4, 6.2, shade(teamColor, -40));
-  // Mag pouches (3)
-  for (const dx of [-2.4, 0, 2.4]) {
-    isoBox(ctx, x + dx, y + 1.2, 2.1, 1.8, 2.6, '#1a1a1a');
-    ctx.fillStyle = '#444';
-    ctx.fillRect(x + dx - 0.5, y + 0.2, 1, 0.5);
-  }
-  // Radio
-  isoBox(ctx, x - 3.6, y - 3.5, 1.8, 1.6, 3.2, '#222');
-  isoBox(ctx, x - 3.6, y - 6.5, 0.7, 0.7, 2.2, '#111');
-  // Arms
-  isoBox(ctx, x - 4.2, y - 1.2, 2.5, 2.4, 5, teamColor);
-  isoBox(ctx, x + 4.2, y - 0.8, 2.5, 2.4, 4.5, teamColor);
-  // Gloves
-  isoBox(ctx, x - 4.2, y + 3.5, 2.3, 2.2, 1.8, '#1c1c1c');
-  isoBox(ctx, x + 4.8, y + 3.2, 2.3, 2.2, 1.8, '#1c1c1c');
-  // Neck / face
-  isoCylinder(ctx, x, y - 7.5, 2.3, 1.4, 2.2, '#e8c39e');
-  // Helmet
-  isoCylinder(ctx, x, y - 9.2, 3.5, 2.1, 3.8, '#2f3e2f');
-  isoBox(ctx, x, y - 9.5, 7.2, 4.5, 1.2, '#263326');
-  // Helmet mount / NV rail
-  isoBox(ctx, x, y - 12.8, 2.4, 2, 1.1, '#111');
-  // Goggles on helmet
-  isoBox(ctx, x, y - 10.2, 4.5, 2.2, 1.3, '#333');
-  ctx.fillStyle = 'rgba(100,180,255,0.55)';
-  ctx.beginPath();
-  ctx.ellipse(x, y - 10.5, 1.8, 0.55, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Chin strap
-  drawLine(ctx, x - 2.2, y - 8.2, x + 2.2, y - 8.2, '#1a1a1a', 0.8);
-
-  drawAssaultRifle(ctx, x + 4.5, y - 0.5);
-}
-
-function drawAssaultRifle(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  // Stock
-  isoBox(ctx, x - 2.5, y + 1.2, 3.2, 1.5, 1.7, '#1a1a1a');
-  // Body
-  isoBox(ctx, x + 2, y + 0.4, 6.5, 1.7, 2, '#2b2b2b');
-  // Mag
-  isoBox(ctx, x + 1.5, y + 3.2, 1.8, 1.4, 3.2, '#111');
-  // Handguard
-  isoBox(ctx, x + 6.5, y + 0.2, 4.5, 1.6, 1.7, '#333');
-  // Barrel + flash hider
-  isoBox(ctx, x + 11, y - 0.3, 5.5, 1, 1, '#1a1a1a');
-  isoBox(ctx, x + 13.5, y - 0.6, 1.6, 1.3, 1.4, '#111');
-  // Optic
-  isoBox(ctx, x + 3.2, y - 1.8, 3.2, 1.5, 1.8, '#222');
-  ctx.fillStyle = '#1864ab';
-  ctx.beginPath();
-  ctx.arc(x + 3.2, y - 2.6, 0.7, 0, Math.PI * 2);
-  ctx.fill();
-  // Grip
-  isoBox(ctx, x + 0.2, y + 2.5, 1.5, 1.4, 2.4, '#1a1a1a');
-}
-
-/** Rank 3 — detailed special forces (gray kit). */
-function drawSpecOps(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
-  shadow(ctx, x, y + 9, 5.6, 2.2, 0.36);
-
-  // Boots
-  isoBox(ctx, x - 1.7, y + 7.5, 2.9, 3, 2.5, '#495057');
-  isoBox(ctx, x + 1.7, y + 7.5, 2.9, 3, 2.5, '#495057');
-  // Legs
-  isoBox(ctx, x - 1.6, y + 4.4, 2.7, 2.7, 4.4, '#6c757d');
-  isoBox(ctx, x + 1.6, y + 4.4, 2.7, 2.7, 4.4, '#6c757d');
-  // Holster
-  isoBox(ctx, x + 2.8, y + 4.8, 1.6, 1.5, 2.8, '#495057');
-  // Torso armor
-  isoBox(ctx, x, y + 0.4, 7.5, 5.3, 8.2, '#868e96');
-  // Team ID stripe
-  isoBox(ctx, x, y + 2.2, 7.7, 5.4, 2.1, teamColor);
-  // Pouches row
-  for (const dx of [-2.6, -0.9, 0.9, 2.6]) {
-    isoBox(ctx, x + dx, y + 0.8, 1.5, 1.5, 2.3, '#495057');
-  }
-  // Shoulder pads
-  isoBox(ctx, x - 4.3, y - 3.5, 2.6, 2.4, 2.2, '#adb5bd');
-  isoBox(ctx, x + 4.3, y - 3.5, 2.6, 2.4, 2.2, '#adb5bd');
-  // Arms
-  isoBox(ctx, x - 4.3, y - 0.8, 2.4, 2.3, 4.8, '#868e96');
-  isoBox(ctx, x + 4.3, y - 0.5, 2.4, 2.3, 4.4, '#868e96');
-  // Gloves
-  isoBox(ctx, x - 4.3, y + 3.6, 2.3, 2.2, 1.7, '#495057');
-  isoBox(ctx, x + 5, y + 3.4, 2.3, 2.2, 1.7, '#495057');
-  // Balaclava head
-  isoCylinder(ctx, x, y - 7.4, 2.9, 1.7, 3.8, '#6c757d');
-  // NVG dual tubes
-  isoBox(ctx, x - 1.3, y - 10.2, 2.2, 2.2, 2.6, '#495057');
-  isoBox(ctx, x + 1.3, y - 10.2, 2.2, 2.2, 2.6, '#495057');
-  const visor = ctx.createLinearGradient(x - 2.5, y - 9, x + 2.5, y - 7.5);
-  visor.addColorStop(0, '#74c0fc');
-  visor.addColorStop(0.5, '#1c7ed6');
-  visor.addColorStop(1, '#1864ab');
-  ctx.fillStyle = visor;
-  ctx.beginPath();
-  ctx.ellipse(x, y - 8.6, 2.5, 0.85, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Glow
-  ctx.fillStyle = 'rgba(116,192,252,0.25)';
-  ctx.beginPath();
-  ctx.ellipse(x, y - 8.6, 3.2, 1.3, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Headset
-  isoBox(ctx, x - 3.1, y - 8.8, 1.3, 1.5, 2.2, '#495057');
-  drawLine(ctx, x - 3.1, y - 7.5, x - 1.5, y - 6.2, '#6c757d', 1);
-
-  drawSuppressedSMG(ctx, x + 4.2, y - 0.2);
-}
-
-function drawSuppressedSMG(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  isoBox(ctx, x - 1.5, y + 1, 2.8, 1.4, 1.5, '#495057');
-  isoBox(ctx, x + 2.2, y + 0.3, 5.5, 1.6, 1.9, '#6c757d');
-  isoBox(ctx, x + 1.5, y + 2.8, 1.5, 1.3, 2.6, '#495057');
-  isoBox(ctx, x + 6.5, y + 0.1, 3.5, 1.3, 1.4, '#adb5bd');
-  // Suppressor
-  isoCylinder(ctx, x + 10.5, y - 0.3, 1.1, 0.7, 4.5, '#6c757d');
-  isoBox(ctx, x + 3, y - 1.6, 2.4, 1.3, 1.4, '#495057');
-  // Laser
-  ctx.fillStyle = '#fa5252';
-  ctx.beginPath();
-  ctx.arc(x + 5.5, y + 1.5, 0.55, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-const T90_SRC = '/t90-tank.png';
-let t90Image: HTMLImageElement | null = null;
-let t90LoadFailed = false;
-const t90ReadyListeners: Array<() => void> = [];
-
-function notifyT90Ready(): void {
-  const listeners = t90ReadyListeners.splice(0);
-  for (const fn of listeners) fn();
-}
-
-function getT90Image(): HTMLImageElement | null {
-  if (t90LoadFailed) return null;
-  if (typeof Image === 'undefined') return null;
-  if (!t90Image) {
-    t90Image = new Image();
-    t90Image.decoding = 'async';
-    t90Image.onload = () => notifyT90Ready();
-    t90Image.onerror = () => {
-      t90LoadFailed = true;
-    };
-    t90Image.src = T90_SRC;
-  }
-  if (t90Image.complete && t90Image.naturalWidth > 0) return t90Image;
-  return null;
-}
-
-/** Start loading unit photo sprites; `onReady` fires when T-90 is available. */
-export function preloadUnitSprites(onReady?: () => void): void {
-  if (onReady) {
-    if (getT90Image()) onReady();
-    else t90ReadyListeners.push(onReady);
+  const size = 34;
+  shadow(ctx, x, y + 10, 14, 4, 0.34);
+  const img = getUnitSprite('guntruck');
+  if (img) {
+    ctx.drawImage(img, x - size / 2, y - size * 0.45, size, size);
+    drawTeamMark(ctx, x - 4, y + 10, teamColor, 10);
   } else {
-    getT90Image();
+    isoBox(ctx, x, y + 3, 18, 10, 5, '#868e96');
+    isoBox(ctx, x - 4, y - 1, 8, 8, 5, shade(teamColor, -20));
+    isoBox(ctx, x + 8, y - 2, 8, 2, 2, '#495057');
   }
+}
+
+/** Rank 1 — militia photo figurine. */
+function drawMilitia(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
+  drawPhotoUnit(ctx, x, y, 'militia', 26, teamColor);
+}
+
+/** Rank 2 — soldier photo figurine. */
+function drawSoldier(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
+  drawPhotoUnit(ctx, x, y, 'soldier', 26, teamColor);
+}
+
+/** Rank 3 — special forces photo figurine. */
+function drawSpecOps(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
+  drawPhotoUnit(ctx, x, y, 'specops', 26, teamColor);
 }
 
 /** Rank 4 — T-90 main battle tank (photo sprite). */
 function drawTank(ctx: CanvasRenderingContext2D, x: number, y: number, teamColor: string): void {
   shadow(ctx, x, y + 10, 16, 5, 0.38);
-  const img = getT90Image();
+  const img = getUnitSprite('t90');
   if (img) {
     const size = 44;
     ctx.drawImage(img, x - size / 2, y - size / 2 - 3, size, size);
-    // Team marking stripe on hull
-    isoBox(ctx, x - 5, y + 7, 10, 3.2, 1.6, teamColor);
+    drawTeamMark(ctx, x - 2, y + 8, teamColor, 10);
   } else {
-    // Fallback silhouette until image loads
     isoBox(ctx, x, y + 3, 22, 12, 6, shade(teamColor, -20));
     isoBox(ctx, x, y - 2, 12, 9, 6, teamColor);
     isoBox(ctx, x + 10, y - 4, 14, 2.2, 2, '#868e96');
