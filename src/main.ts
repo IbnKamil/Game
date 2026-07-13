@@ -142,6 +142,15 @@ let panning = false;
 let panLastX = 0;
 let panLastY = 0;
 let panMoved = false;
+let hoverRaf = 0;
+
+function scheduleHoverDraw(): void {
+  if (hoverRaf) return;
+  hoverRaf = window.requestAnimationFrame(() => {
+    hoverRaf = 0;
+    if (game && renderer) renderer.draw(game);
+  });
+}
 
 function bindCanvas(c: HTMLCanvasElement): void {
   if (canvasBound) return;
@@ -172,7 +181,7 @@ function bindCanvas(c: HTMLCanvasElement): void {
       renderer.panBy(dx, dy);
       panLastX = e.clientX;
       panLastY = e.clientY;
-      renderer.draw(game);
+      scheduleHoverDraw();
     }
   });
 
@@ -208,7 +217,7 @@ function bindCanvas(c: HTMLCanvasElement): void {
     const next = game.cells[key] ? key : null;
     if (next !== game.ui.hoverKey) {
       game.ui.hoverKey = next;
-      renderer.draw(game);
+      scheduleHoverDraw();
     }
   });
 
@@ -241,6 +250,7 @@ window.addEventListener('resize', () => {
 
 window.addEventListener('keydown', (e) => {
   if (!game || hud.shell.hidden) return;
+  if (e.repeat) return;
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();
     endTurnFlow();

@@ -33,7 +33,7 @@ export const RECRUIT_LABEL: Record<HouseRank, string> = {
 /** How many figures are drawn for each rank. */
 export const UNIT_FIGURE_COUNT: Record<UnitRank, number> = {
   1: 5,
-  2: 3,
+  2: 10,
   3: 3,
   4: 1,
 };

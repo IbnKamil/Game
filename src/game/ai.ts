@@ -25,6 +25,7 @@ interface AiProfile {
   reserveMoney: number;
   aggression: number;
   preferEconomy: number;
+  maxMoves: number;
 }
 
 const PROFILES: Record<AiDifficulty, AiProfile> = {
@@ -35,6 +36,7 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
     reserveMoney: 18,
     aggression: 0.35,
     preferEconomy: 0.4,
+    maxMoves: 8,
   },
   normal: {
     mistakeChance: 0.18,
@@ -43,6 +45,7 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
     reserveMoney: 10,
     aggression: 0.65,
     preferEconomy: 0.7,
+    maxMoves: 14,
   },
   hard: {
     mistakeChance: 0.05,
@@ -51,18 +54,20 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
     reserveMoney: 6,
     aggression: 0.9,
     preferEconomy: 0.95,
+    maxMoves: 20,
   },
   expert: {
     mistakeChance: 0,
     skipMoveChance: 0,
-    buildPasses: 3,
+    buildPasses: 2,
     reserveMoney: 4,
     aggression: 1,
     preferEconomy: 1,
+    maxMoves: 28,
   },
 };
 
-/** Heuristic AI scaled by difficulty. Uses direct Game APIs (not human UI gates). */
+/** Heuristic AI — batched province rebuilds to avoid UI freezes. */
 export function runAiTurn(game: Game, playerId: PlayerId): void {
   if (game.winnerId || game.currentPlayerId !== playerId) return;
   if (game.currentPlayer().isHuman) return;
@@ -72,56 +77,67 @@ export function runAiTurn(game: Game, playerId: PlayerId): void {
   const provinces = provincesOfPlayer(game.provinces, playerId);
   if (provinces.length === 0) return;
 
-  for (let pass = 0; pass < profile.buildPasses; pass++) {
-    for (const prov of [...provincesOfPlayer(game.provinces, playerId)].sort(
-      (a, b) => b.hexes.length - a.hexes.length,
-    )) {
-      maybeBuild(game, prov.id, profile);
-    }
-  }
-
-  for (const prov of provincesOfPlayer(game.provinces, playerId)) {
-    maybeSummon(game, prov.id, profile, difficulty);
-  }
-
-  const unitKeys: string[] = [];
-  for (const prov of provincesOfPlayer(game.provinces, playerId)) {
-    for (const key of prov.hexes) {
-      const u = game.cells[key].unit;
-      if (u && u.owner === playerId && !u.moved) unitKeys.push(key);
-    }
-  }
-
-  if (difficulty === 'hard' || difficulty === 'expert') {
-    unitKeys.sort((a, b) => (game.cells[b].unit?.rank ?? 0) - (game.cells[a].unit?.rank ?? 0));
-  }
-
-  for (const fromKey of unitKeys) {
-    // Re-check — unit may have merged/moved
-    const unit = game.cells[fromKey]?.unit;
-    if (!unit || unit.moved || unit.owner !== playerId) continue;
-    if (Math.random() < profile.skipMoveChance) continue;
-
-    const targets = [...game.moveTargets(fromKey)];
-    if (targets.length === 0) continue;
-
-    targets.sort(
-      (a, b) =>
-        scoreMove(game, playerId, a, profile) - scoreMove(game, playerId, b, profile),
-    );
-
-    let chosen = targets[targets.length - 1];
-    if (Math.random() < profile.mistakeChance && targets.length > 1) {
-      chosen = targets[Math.floor(Math.random() * Math.min(3, targets.length))];
+  game.beginBatch();
+  try {
+    for (let pass = 0; pass < profile.buildPasses; pass++) {
+      for (const prov of [...provincesOfPlayer(game.provinces, playerId)].sort(
+        (a, b) => b.hexes.length - a.hexes.length,
+      )) {
+        maybeBuild(game, prov.id, profile);
+      }
     }
 
-    const bestScore = scoreMove(game, playerId, chosen, profile);
-    if (bestScore > 0 || Math.random() < profile.aggression) {
-      game.moveUnitTo(fromKey, chosen);
+    for (const prov of provincesOfPlayer(game.provinces, playerId)) {
+      maybeSummon(game, prov.id, profile, difficulty);
     }
-  }
 
-  game.clearSelection();
+    const unitKeys: string[] = [];
+    for (const prov of provincesOfPlayer(game.provinces, playerId)) {
+      for (const key of prov.hexes) {
+        const u = game.cells[key].unit;
+        if (u && u.owner === playerId && !u.moved) unitKeys.push(key);
+      }
+    }
+
+    if (difficulty === 'hard' || difficulty === 'expert') {
+      unitKeys.sort((a, b) => (game.cells[b].unit?.rank ?? 0) - (game.cells[a].unit?.rank ?? 0));
+    }
+
+    let moved = 0;
+    for (const fromKey of unitKeys) {
+      if (moved >= profile.maxMoves) break;
+      const unit = game.cells[fromKey]?.unit;
+      if (!unit || unit.moved || unit.owner !== playerId) continue;
+      if (Math.random() < profile.skipMoveChance) continue;
+
+      const targets = [...game.moveTargets(fromKey)];
+      if (targets.length === 0) continue;
+
+      let best = targets[0];
+      let bestScore = scoreMove(game, playerId, best, profile);
+      for (let i = 1; i < targets.length; i++) {
+        const s = scoreMove(game, playerId, targets[i], profile);
+        if (s > bestScore) {
+          bestScore = s;
+          best = targets[i];
+        }
+      }
+
+      let chosen = best;
+      if (Math.random() < profile.mistakeChance && targets.length > 1) {
+        chosen = targets[Math.floor(Math.random() * Math.min(3, targets.length))];
+      }
+
+      if (bestScore > 0 || Math.random() < profile.aggression) {
+        game.moveUnitTo(fromKey, chosen);
+        moved += 1;
+      }
+    }
+
+    game.clearSelection();
+  } finally {
+    game.endBatch();
+  }
 }
 
 function scoreMove(
@@ -200,7 +216,6 @@ function maybeBuild(game: Game, provinceId: number, profile: AiProfile): void {
   const prov = game.provinces.find((p) => p.id === provinceId);
   if (!prov || prov.owner !== game.currentPlayerId) return;
 
-  // Can build on trees (they get cleared)
   const empty = prov.hexes.filter((h) => {
     const c = game.cells[h];
     return !c.unit && !c.building;

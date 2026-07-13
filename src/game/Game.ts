@@ -58,6 +58,8 @@ export class Game {
   private rng: () => number;
   readonly config: GameConfig;
   private undoStack: GameSnapshot[] = [];
+  private batchDepth = 0;
+  private provincesDirty = false;
 
   constructor(config: GameConfig) {
     this.config = config;
@@ -87,8 +89,9 @@ export class Game {
   pushUndo(): void {
     // Skip during AI turns — structuredClone of the full map freezes the UI
     if (!this.currentPlayer()?.isHuman) return;
+    // Keep undo light: fewer deep clones
     this.undoStack.push(this.snapshot());
-    if (this.undoStack.length > 20) this.undoStack.shift();
+    if (this.undoStack.length > 12) this.undoStack.shift();
   }
 
   undo(): boolean {
@@ -130,7 +133,25 @@ export class Game {
   }
 
   private refreshProvinces(): void {
+    if (this.batchDepth > 0) {
+      this.provincesDirty = true;
+      return;
+    }
     this.provinces = rebuildProvinces(this.cells, this.provinces, this.nextProvinceId);
+  }
+
+  /** Batch AI/actions: defer expensive province rebuilds. */
+  beginBatch(): void {
+    this.batchDepth += 1;
+  }
+
+  endBatch(): void {
+    this.batchDepth = Math.max(0, this.batchDepth - 1);
+    if (this.batchDepth === 0 && this.provincesDirty) {
+      this.provincesDirty = false;
+      this.provinces = rebuildProvinces(this.cells, this.provinces, this.nextProvinceId);
+      this.checkWinner();
+    }
   }
 
   private checkWinner(): void {
@@ -408,7 +429,7 @@ export class Game {
     to.unit = { ...unit, moved: true };
 
     this.refreshProvinces();
-    this.checkWinner();
+    if (this.batchDepth === 0) this.checkWinner();
     this.ui = { selectedKey: toKey, mode: 'none', hoverKey: this.ui.hoverKey };
     this.message = 'Территория захвачена!';
   }

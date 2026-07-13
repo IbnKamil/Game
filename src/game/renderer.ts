@@ -1,6 +1,6 @@
 import type { Game } from './Game';
 import { hexCorners, hexToPixel, pixelToHex } from './hex';
-import { drawBuildingFigurine, drawUnitFigurine } from './sprites';
+import { drawBuildingFigurine, drawUnitFigurine, drawUnitLod } from './sprites';
 import { cellKey, type UnitRank } from './types';
 
 export const HEX_SIZE = 48; // was 32; figurines stay at previous world pixel size
@@ -191,7 +191,14 @@ export class Renderer {
       if (cell.unit) {
         const team = game.players.find((p) => p.id === cell.unit!.owner)?.color ?? '#212529';
         const uy = cell.building ? y + 10 : y + 3;
-        drawUnitFigurine(ctx, x, uy, cell.unit.rank as UnitRank, cell.unit.moved, team);
+        const rank = cell.unit.rank as UnitRank;
+        if (this.scale < 0.7) {
+          drawUnitLod(ctx, x, uy, rank, cell.unit.moved, team);
+        } else {
+          drawUnitFigurine(ctx, x, uy, rank, cell.unit.moved, team, {
+            compact: this.scale < 1.05,
+          });
+        }
       }
     }
 
