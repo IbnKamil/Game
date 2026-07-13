@@ -214,6 +214,77 @@ describe('AI actions', () => {
     const training = prov.hexes.some((h) => g.cells[h].training);
     expect(afterBuildings >= beforeBuildings || training).toBe(true);
   });
+
+  it('does not fill a tiny starting province with farms before a house', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    const g = new Game({
+      mapRadius: 6,
+      playerCount: 2,
+      seed: 42,
+      players,
+      aiDifficulty: 'normal',
+    });
+    g.currentPlayerId = 1;
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    // Mimic start: 3 hexes, castle + 2 empty, enough for farms but not a house
+    while (prov.hexes.length > 3) {
+      const drop = prov.hexes.find((h) => g.cells[h].building !== 'castle')!;
+      g.cells[drop].owner = 0;
+      prov.hexes = prov.hexes.filter((h) => h !== drop);
+    }
+    for (const h of prov.hexes) {
+      const c = g.cells[h];
+      if (c.building !== 'castle') {
+        c.building = null;
+        c.unit = null;
+        c.tree = false;
+      }
+    }
+    prov.money = 20; // farm-affordable, below house1 (25)
+    runAiTurn(g, 1);
+    const farms = prov.hexes.filter((h) => g.cells[h].building === 'farm').length;
+    const houses = prov.hexes.filter((h) => {
+      const b = g.cells[h].building;
+      return b === 'house1' || b === 'house2' || b === 'house3' || b === 'house4';
+    }).length;
+    expect(farms).toBe(0);
+    expect(houses).toBe(0);
+    const free = prov.hexes.filter((h) => !g.cells[h].building && !g.cells[h].unit).length;
+    expect(free).toBeGreaterThanOrEqual(1);
+  });
+
+  it('builds a house first when a tiny province can afford it', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    const g = new Game({
+      mapRadius: 6,
+      playerCount: 2,
+      seed: 7,
+      players,
+      aiDifficulty: 'hard',
+    });
+    g.currentPlayerId = 1;
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    while (prov.hexes.length > 3) {
+      const drop = prov.hexes.find((h) => g.cells[h].building !== 'castle')!;
+      g.cells[drop].owner = 0;
+      prov.hexes = prov.hexes.filter((h) => h !== drop);
+    }
+    for (const h of prov.hexes) {
+      const c = g.cells[h];
+      if (c.building !== 'castle') {
+        c.building = null;
+        c.unit = null;
+        c.tree = false;
+      }
+    }
+    prov.money = 40;
+    runAiTurn(g, 1);
+    const houses = prov.hexes.filter((h) => {
+      const b = g.cells[h].building;
+      return b === 'house1' || b === 'house2' || b === 'house3' || b === 'house4';
+    }).length;
+    expect(houses).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe('Movement rules', () => {

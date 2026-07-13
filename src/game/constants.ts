@@ -119,7 +119,7 @@ export type MapSizeId = (typeof MAP_SIZE_PRESETS)[number]['id'];
 
 export const AI_DIFFICULTY_PRESETS = [
   { id: 'easy', label: 'Лёгкий', hint: 'Ошибки, медленное развитие' },
-  { id: 'normal', label: 'Обычный', hint: 'Сбалансированный ИИ' },
+  { id: 'normal', label: 'Обычный', hint: 'Домики, набор, давление' },
   { id: 'hard', label: 'Сложный', hint: 'Агрессия и экономика' },
   { id: 'expert', label: 'Эксперт', hint: 'Максимальное давление' },
 ] as const;
