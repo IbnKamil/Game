@@ -339,8 +339,8 @@ const BUILDING_DRAW_SIZE: Record<BuildingSpriteId, number> = {
 
 const FOREST_DRAW_SIZE = 36;
 
-/** Draw size covering ~90% of a hex (HEX_SIZE≈48 → diameter≈96). */
-export const FOREST_HEX_FILL_SIZE = 86;
+/** Draw size covering ~90% of a hex cell (accounts for sprite padding). */
+export const FOREST_HEX_FILL_SIZE = 100;
 
 interface SpriteState {
   img: HTMLImageElement | null;
