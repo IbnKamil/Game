@@ -330,9 +330,9 @@ export class Renderer {
         ctx.save();
         pathHex(ctx, x, y);
         ctx.clip();
-        ctx.fillStyle = 'rgba(22, 64, 34, 0.45)';
+        ctx.fillStyle = 'rgba(22, 64, 34, 0.28)';
         ctx.fill();
-        drawForestFigurine(ctx, x, y + 2, FOREST_HEX_FILL_SIZE);
+        drawForestFigurine(ctx, x, y + 1, FOREST_HEX_FILL_SIZE);
         ctx.restore();
       }
       if (cell.building) {
