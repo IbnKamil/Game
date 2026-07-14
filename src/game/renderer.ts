@@ -1,6 +1,6 @@
 import type { Game } from './Game';
 import { HEX_DIRS, hexToPixel, pixelToHex } from './hex';
-import { drawBuildingFigurine, drawUnitFigurine } from './sprites';
+import { drawBuildingFigurine, drawForestFigurine, drawUnitFigurine } from './sprites';
 import { elevationBand, shadeRgbHex, topoWithOwner } from './topo';
 import { cellKey, type HexCell, type UnitRank } from './types';
 
@@ -326,12 +326,7 @@ export class Renderer {
       const y = this.posY[i] - this.originY;
 
       if (cell.tree) {
-        ctx.fillStyle = '#6b4226';
-        ctx.fillRect(x - 1.2, y - 1, 2.4, 7);
-        ctx.fillStyle = '#2b8a3e';
-        ctx.beginPath();
-        ctx.arc(x, y - 5, 6.5, 0, Math.PI * 2);
-        ctx.fill();
+        drawForestFigurine(ctx, x, y - 2);
       }
       if (cell.building) {
         drawBuildingFigurine(ctx, x, y - 2, cell.building, cell.training?.turnsLeft ?? null);

@@ -300,6 +300,7 @@ type BuildingSpriteId =
   | 'house2'
   | 'house3'
   | 'house4';
+type TerrainSpriteId = 'forest';
 
 const UNIT_SPRITE_SRC: Record<UnitSpriteId, string> = {
   militia: '/militia.png',
@@ -320,6 +321,10 @@ const BUILDING_SPRITE_SRC: Record<BuildingSpriteId, string> = {
   house4: '/house4.png',
 };
 
+const TERRAIN_SPRITE_SRC: Record<TerrainSpriteId, string> = {
+  forest: '/forest.png',
+};
+
 /** Map draw size for isometric building portraits. */
 const BUILDING_DRAW_SIZE: Record<BuildingSpriteId, number> = {
   castle: 44,
@@ -331,6 +336,8 @@ const BUILDING_DRAW_SIZE: Record<BuildingSpriteId, number> = {
   house3: 44,
   house4: 46,
 };
+
+const FOREST_DRAW_SIZE = 36;
 
 interface SpriteState {
   img: HTMLImageElement | null;
@@ -356,6 +363,10 @@ const buildingSpriteState: Record<BuildingSpriteId, SpriteState> = {
   house4: { img: null, failed: false },
 };
 
+const terrainSpriteState: Record<TerrainSpriteId, SpriteState> = {
+  forest: { img: null, failed: false },
+};
+
 const unitSpriteReadyListeners: Array<() => void> = [];
 
 function notifyUnitSpritesMaybeReady(): void {
@@ -375,7 +386,12 @@ function allSpritesSettled(): boolean {
     if (s.failed) return true;
     return !!s.img && s.img.complete && s.img.naturalWidth > 0;
   });
-  return unitsOk && buildingsOk;
+  const terrainOk = (Object.keys(TERRAIN_SPRITE_SRC) as TerrainSpriteId[]).every((id) => {
+    const s = terrainSpriteState[id];
+    if (s.failed) return true;
+    return !!s.img && s.img.complete && s.img.naturalWidth > 0;
+  });
+  return unitsOk && buildingsOk && terrainOk;
 }
 
 function loadSprite(
@@ -408,10 +424,15 @@ function getBuildingSprite(id: BuildingSpriteId): HTMLImageElement | null {
   return loadSprite(buildingSpriteState[id], BUILDING_SPRITE_SRC[id]);
 }
 
+function getTerrainSprite(id: TerrainSpriteId): HTMLImageElement | null {
+  return loadSprite(terrainSpriteState[id], TERRAIN_SPRITE_SRC[id]);
+}
+
 /** Start loading unit/building photo sprites; `onReady` fires when all have loaded (or failed). */
 export function preloadUnitSprites(onReady?: () => void): void {
   for (const id of Object.keys(UNIT_SPRITE_SRC) as UnitSpriteId[]) getUnitSprite(id);
   for (const id of Object.keys(BUILDING_SPRITE_SRC) as BuildingSpriteId[]) getBuildingSprite(id);
+  for (const id of Object.keys(TERRAIN_SPRITE_SRC) as TerrainSpriteId[]) getTerrainSprite(id);
   if (!onReady) return;
   if (allSpritesSettled()) onReady();
   else unitSpriteReadyListeners.push(onReady);
@@ -518,6 +539,35 @@ export function drawBuildingFigurine(
       else if (rank === 3) drawHeadquarters(ctx, x, y, trainLeft);
       else drawMilitaryFactory(ctx, x, y, trainLeft);
     }
+  }
+  ctx.restore();
+}
+
+/** Forest marker for hexes with trees — isometric cutout like buildings. */
+export function drawForestFigurine(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'medium';
+  const img = getTerrainSprite('forest');
+  const size = FOREST_DRAW_SIZE;
+  if (img) {
+    shadow(ctx, x, y + 10, size * 0.42, size * 0.14, 0.3);
+    ctx.drawImage(img, x - size / 2, y - size * 0.55, size, size);
+  } else {
+    // Compact fallback while the photo loads
+    shadow(ctx, x, y + 8, 10, 3.5, 0.28);
+    ctx.fillStyle = '#6b4226';
+    ctx.fillRect(x - 1.2, y - 1, 2.4, 7);
+    ctx.fillStyle = '#2b8a3e';
+    ctx.beginPath();
+    ctx.arc(x, y - 5, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x - 5, y - 2, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + 5, y - 3, 4.8, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.restore();
 }
