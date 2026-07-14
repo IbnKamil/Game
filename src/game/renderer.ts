@@ -1,6 +1,6 @@
 import type { Game } from './Game';
 import { HEX_DIRS, hexToPixel, pixelToHex } from './hex';
-import { drawBuildingFigurine, drawForestFigurine, drawUnitFigurine } from './sprites';
+import { drawBuildingFigurine, drawForestFigurine, FOREST_HEX_FILL_SIZE, drawUnitFigurine } from './sprites';
 import { elevationBand, shadeRgbHex, topoWithOwner } from './topo';
 import { cellKey, type HexCell, type UnitRank } from './types';
 
@@ -326,7 +326,14 @@ export class Renderer {
       const y = this.posY[i] - this.originY;
 
       if (cell.tree) {
-        drawForestFigurine(ctx, x, y - 2);
+        // Fill the whole hex with forest (clip so neighbors stay clean)
+        ctx.save();
+        pathHex(ctx, x, y);
+        ctx.clip();
+        ctx.fillStyle = 'rgba(22, 64, 34, 0.45)';
+        ctx.fill();
+        drawForestFigurine(ctx, x, y + 2, FOREST_HEX_FILL_SIZE);
+        ctx.restore();
       }
       if (cell.building) {
         drawBuildingFigurine(ctx, x, y - 2, cell.building, cell.training?.turnsLeft ?? null);

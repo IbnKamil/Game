@@ -339,6 +339,9 @@ const BUILDING_DRAW_SIZE: Record<BuildingSpriteId, number> = {
 
 const FOREST_DRAW_SIZE = 36;
 
+/** Draw size that covers a full hex of radius ≈ HEX_SIZE. */
+export const FOREST_HEX_FILL_SIZE = 118;
+
 interface SpriteState {
   img: HTMLImageElement | null;
   failed: boolean;
@@ -543,33 +546,62 @@ export function drawBuildingFigurine(
   ctx.restore();
 }
 
-/** Forest marker for hexes with trees — isometric cutout like buildings. */
-export function drawForestFigurine(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+/**
+ * Forest cover for a hex. Pass `size` ≈ hex diameter to fill the cell;
+ * caller should clip to the hex path when filling the whole tile.
+ */
+export function drawForestFigurine(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number = FOREST_DRAW_SIZE,
+): void {
   ctx.save();
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'medium';
   const img = getTerrainSprite('forest');
-  const size = FOREST_DRAW_SIZE;
   if (img) {
-    shadow(ctx, x, y + 10, size * 0.42, size * 0.14, 0.3);
-    ctx.drawImage(img, x - size / 2, y - size * 0.55, size, size);
+    // No drop shadow when filling a hex — it muddies clipped edges
+    if (size <= FOREST_DRAW_SIZE + 4) {
+      shadow(ctx, x, y + size * 0.28, size * 0.42, size * 0.14, 0.3);
+    }
+    ctx.drawImage(img, x - size / 2, y - size * 0.52, size, size);
   } else {
-    // Compact fallback while the photo loads
-    shadow(ctx, x, y + 8, 10, 3.5, 0.28);
-    ctx.fillStyle = '#6b4226';
-    ctx.fillRect(x - 1.2, y - 1, 2.4, 7);
-    ctx.fillStyle = '#2b8a3e';
-    ctx.beginPath();
-    ctx.arc(x, y - 5, 6.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x - 5, y - 2, 4.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x + 5, y - 3, 4.8, 0, Math.PI * 2);
-    ctx.fill();
+    drawForestFallback(ctx, x, y, size);
   }
   ctx.restore();
+}
+
+function drawForestFallback(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+): void {
+  if (size > 50) {
+    ctx.fillStyle = 'rgba(34, 92, 48, 0.72)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + size * 0.02, size * 0.46, size * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const scale = Math.max(0.7, size / 48);
+  const crowns: [number, number, number][] = [
+    [0, -6, 7],
+    [-10, -2, 6],
+    [10, -3, 6.2],
+    [-5, 4, 5],
+    [6, 5, 5.2],
+    [0, 2, 5.5],
+  ];
+  for (const [dx, dy, r] of crowns) {
+    ctx.fillStyle = '#6b4226';
+    const tw = 1.2 * scale;
+    ctx.fillRect(x + dx * scale - tw / 2, y + dy * scale, tw, 6 * scale);
+    ctx.fillStyle = '#2b8a3e';
+    ctx.beginPath();
+    ctx.arc(x + dx * scale, y + (dy - 5) * scale, r * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function drawBuildingPhoto(
