@@ -326,12 +326,10 @@ export class Renderer {
       const y = this.posY[i] - this.originY;
 
       if (cell.tree) {
-        // Fill the whole hex with forest (clip so neighbors stay clean)
+        // Cover ~90% of the hex (clip so neighbors stay clean)
         ctx.save();
         pathHex(ctx, x, y);
         ctx.clip();
-        ctx.fillStyle = 'rgba(22, 64, 34, 0.28)';
-        ctx.fill();
         drawForestFigurine(ctx, x, y + 1, FOREST_HEX_FILL_SIZE);
         ctx.restore();
       }

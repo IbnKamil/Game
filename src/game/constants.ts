@@ -147,6 +147,21 @@ export function clampForestDensity(value: number): number {
   return Math.max(FOREST_DENSITY_MIN, Math.min(FOREST_DENSITY_MAX, Math.round(value)));
 }
 
+/**
+ * Forest spread speed (0–100). At 100 matches classic Antiyoy-like rates
+ * (~12% / ~35% palm per adjacent empty hex each full turn).
+ */
+export const DEFAULT_FOREST_SPREAD = 100;
+export const FOREST_SPREAD_MIN = 0;
+export const FOREST_SPREAD_MAX = 100;
+export const FOREST_SPREAD_BASE_CHANCE = 0.12;
+export const FOREST_SPREAD_PALM_CHANCE = 0.35;
+
+export function clampForestSpread(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_FOREST_SPREAD;
+  return Math.max(FOREST_SPREAD_MIN, Math.min(FOREST_SPREAD_MAX, Math.round(value)));
+}
+
 export function houseKind(rank: HouseRank): BuildingKind {
   return `house${rank}` as BuildingKind;
 }

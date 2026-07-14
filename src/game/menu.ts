@@ -1,12 +1,16 @@
 import {
   AI_DIFFICULTY_PRESETS,
   DEFAULT_FOREST_DENSITY,
+  DEFAULT_FOREST_SPREAD,
   DEFAULT_NATION_NAMES,
   FOREST_DENSITY_MAX,
   FOREST_DENSITY_MIN,
+  FOREST_SPREAD_MAX,
+  FOREST_SPREAD_MIN,
   MAP_SIZE_PRESETS,
   PLAYER_COLORS,
   clampForestDensity,
+  clampForestSpread,
   defaultPlayerSetup,
   mapRadiusFromSize,
   type AiDifficultyId,
@@ -22,6 +26,8 @@ export interface MenuState {
   aiDifficulty: AiDifficultyId;
   /** Target forest coverage 0–100%. */
   forestDensity: number;
+  /** Tree spread speed each full turn 0–100%. */
+  forestSpread: number;
   players: PlayerSetup[];
 }
 
@@ -34,6 +40,7 @@ export function defaultMenuState(): MenuState {
     mapSize: 'medium',
     aiDifficulty: 'normal',
     forestDensity: DEFAULT_FOREST_DENSITY,
+    forestSpread: DEFAULT_FOREST_SPREAD,
     players: Array.from({ length: playerCount }, (_, i) =>
       defaultPlayerSetup(i, i < humanCount),
     ),
@@ -73,6 +80,7 @@ export function menuToConfig(state: MenuState): GameConfig {
     players: state.players.map((p) => ({ ...p })),
     aiDifficulty: state.aiDifficulty as AiDifficulty,
     forestDensity: clampForestDensity(state.forestDensity ?? DEFAULT_FOREST_DENSITY),
+    forestSpread: clampForestSpread(state.forestSpread ?? DEFAULT_FOREST_SPREAD),
   };
 }
 
@@ -134,6 +142,19 @@ export function mountMenu(
             />
             <b>${clampForestDensity(state.forestDensity)}%</b>
             <em class="field-hint">Доля клеток с деревьями при генерации карты</em>
+          </label>
+          <label class="field field-wide">
+            <span>Скорость распространения леса</span>
+            <input
+              type="range"
+              min="${FOREST_SPREAD_MIN}"
+              max="${FOREST_SPREAD_MAX}"
+              step="5"
+              value="${clampForestSpread(state.forestSpread)}"
+              data-field="forestSpread"
+            />
+            <b>${clampForestSpread(state.forestSpread)}%</b>
+            <em class="field-hint">Как быстро деревья захватывают соседние клетки каждый ход (0 — не растут)</em>
           </label>
           <label class="field field-wide">
             <span>Сложность ИИ</span>
@@ -206,6 +227,12 @@ export function mountMenu(
           state.forestDensity = clampForestDensity(value);
           const label = input.parentElement?.querySelector('b');
           if (label) label.textContent = `${state.forestDensity}%`;
+          return;
+        }
+        if (field === 'forestSpread') {
+          state.forestSpread = clampForestSpread(value);
+          const label = input.parentElement?.querySelector('b');
+          if (label) label.textContent = `${state.forestSpread}%`;
         }
       });
     });

@@ -96,6 +96,8 @@ export interface GameConfig {
   aiDifficulty: AiDifficulty;
   /** Target % of land hexes with trees at generation (0–100). Default 10. */
   forestDensity?: number;
+  /** Tree spread speed each full turn (0–100). Default 100. */
+  forestSpread?: number;
 }
 
 export type AiDifficulty = 'easy' | 'normal' | 'hard' | 'expert';

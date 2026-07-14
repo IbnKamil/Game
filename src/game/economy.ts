@@ -2,9 +2,12 @@ import {
   BUILDING_INCOME_MOD,
   BUILDING_PROTECTION,
   FARM_INCOME,
+  FOREST_SPREAD_BASE_CHANCE,
+  FOREST_SPREAD_PALM_CHANCE,
   INCOME_PER_HEX,
   STARTING_MONEY,
   UNIT_UPKEEP,
+  clampForestSpread,
 } from './constants';
 import { hexNeighbors } from './hex';
 import {
@@ -332,7 +335,14 @@ export function applyIncomeAndStarve(
   return messages;
 }
 
-export function spreadTrees(cells: Record<string, HexCell>, rng: () => number): void {
+export function spreadTrees(
+  cells: Record<string, HexCell>,
+  rng: () => number,
+  forestSpread = 100,
+): void {
+  const speed = clampForestSpread(forestSpread) / 100;
+  if (speed <= 0) return;
+
   const toGrow: string[] = [];
   for (const cell of Object.values(cells)) {
     if (!cell.tree) continue;
@@ -340,7 +350,7 @@ export function spreadTrees(cells: Record<string, HexCell>, rng: () => number): 
       const nk = cellKey(n.q, n.r);
       const nc = cells[nk];
       if (!nc || nc.tree || nc.unit || nc.building) continue;
-      const chance = cell.palm ? 0.35 : 0.12;
+      const chance = (cell.palm ? FOREST_SPREAD_PALM_CHANCE : FOREST_SPREAD_BASE_CHANCE) * speed;
       if (rng() < chance) toGrow.push(nk);
     }
   }

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_FOREST_SPREAD,
   HOUSE_COST,
   HOUSE_TRAIN_TURNS,
   RECRUIT_LABEL,
@@ -608,7 +609,7 @@ export class Game {
 
     if (this.currentPlayerId === aliveIds[0] && prevId !== this.currentPlayerId) {
       this.turn += 1;
-      spreadTrees(this.cells, this.rng);
+      spreadTrees(this.cells, this.rng, this.config.forestSpread ?? DEFAULT_FOREST_SPREAD);
       this.bumpTerrain();
     }
 

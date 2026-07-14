@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runAiTurn } from './ai';
 import { HOUSE_COST, HOUSE_TRAIN_TURNS, UNIT_COST, defaultPlayerSetup } from './constants';
-import { canCapture, defenseStrength, netIncome } from './economy';
+import { canCapture, defenseStrength, netIncome, spreadTrees } from './economy';
 import { Game } from './Game';
 import { hexNeighbors } from './hex';
 import { menuToConfig, defaultMenuState, syncPlayers } from './menu';
@@ -90,6 +90,15 @@ describe('Start menu config', () => {
     state.forestDensity = 999;
     expect(menuToConfig(state).forestDensity).toBe(100);
   });
+
+  it('passes forest spread speed from menu slider', () => {
+    const state = defaultMenuState();
+    expect(state.forestSpread).toBe(100);
+    state.forestSpread = 25;
+    expect(menuToConfig(state).forestSpread).toBe(25);
+    state.forestSpread = -10;
+    expect(menuToConfig(state).forestSpread).toBe(0);
+  });
 });
 
 describe('Forest density', () => {
@@ -119,6 +128,35 @@ describe('Forest density', () => {
     // Starts clear trees on claimed hexes, so allow some slack below target
     expect(treesHigh / total).toBeGreaterThan(0.35);
     expect(treesHigh / total).toBeLessThan(0.7);
+  });
+
+  it('does not spread trees when forestSpread is 0', () => {
+    const g = new Game({
+      mapRadius: 6,
+      playerCount: 2,
+      seed: 9,
+      players: Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, i === 0)),
+      aiDifficulty: 'normal',
+      forestDensity: 40,
+      forestSpread: 0,
+    });
+    // Clear units/buildings on a few empty neighbors so spread would be possible
+    const tree = Object.values(g.cells).find((c) => c.tree)!;
+    expect(tree).toBeTruthy();
+    for (const n of hexNeighbors(tree.q, tree.r)) {
+      const nc = g.cells[cellKey(n.q, n.r)];
+      if (!nc) continue;
+      nc.unit = null;
+      nc.building = null;
+    }
+    const before = Object.values(g.cells).filter((c) => c.tree).length;
+    let calls = 0;
+    spreadTrees(g.cells, () => {
+      calls += 1;
+      return 0;
+    }, 0);
+    expect(calls).toBe(0);
+    expect(Object.values(g.cells).filter((c) => c.tree).length).toBe(before);
   });
 });
 
