@@ -34,12 +34,18 @@ interface AiProfile {
   aggression: number;
   preferEconomy: number;
   maxMoves: number;
-  /** Always move if any positive-scoring target exists. */
+  /** Always move if score exceeds moveThreshold. */
   alwaysMove: boolean;
   /** Prefer land grab / army over farming. */
   expandFirst: boolean;
   /** Target units ≈ hexes * density. */
   armyDensity: number;
+  /** Minimum score to accept a move when alwaysMove. */
+  moveThreshold: number;
+  /** Prefer attacking human players. */
+  focusHuman: boolean;
+  /** Transfer surplus coins / units to allies. */
+  aidAllies: boolean;
 }
 
 const PROFILES: Record<AiDifficulty, AiProfile> = {
@@ -54,6 +60,9 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
     alwaysMove: false,
     expandFirst: false,
     armyDensity: 0.2,
+    moveThreshold: 8,
+    focusHuman: false,
+    aidAllies: false,
   },
   normal: {
     mistakeChance: 0.08,
@@ -66,30 +75,39 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
     alwaysMove: false,
     expandFirst: true,
     armyDensity: 0.4,
+    moveThreshold: 8,
+    focusHuman: false,
+    aidAllies: false,
   },
   hard: {
     mistakeChance: 0.01,
     skipMoveChance: 0,
     buildPasses: 4,
     reserveMoney: 2,
-    aggression: 1.1,
-    preferEconomy: 0.6,
-    maxMoves: 40,
+    aggression: 1.15,
+    preferEconomy: 0.75,
+    maxMoves: 50,
     alwaysMove: true,
     expandFirst: true,
-    armyDensity: 0.5,
+    armyDensity: 0.6,
+    moveThreshold: 0,
+    focusHuman: true,
+    aidAllies: true,
   },
   expert: {
     mistakeChance: 0,
     skipMoveChance: 0,
-    buildPasses: 6,
+    buildPasses: 8,
     reserveMoney: 0,
-    aggression: 1.35,
-    preferEconomy: 0.7,
-    maxMoves: 100,
+    aggression: 1.65,
+    preferEconomy: 0.95,
+    maxMoves: 200,
     alwaysMove: true,
     expandFirst: true,
-    armyDensity: 0.65,
+    armyDensity: 0.95,
+    moveThreshold: -8,
+    focusHuman: true,
+    aidAllies: true,
   },
 };
 
@@ -121,22 +139,48 @@ export function runAiTurn(game: Game, playerId: PlayerId): void {
 
     // Extra farm pass for leftover cash after recruiting
     for (const prov of provincesOfPlayer(game.provinces, playerId)) {
-      maybeBuildFarmOnly(game, prov.id, profile);
+      maybeBuildFarmOnly(game, prov.id, profile, difficulty);
     }
 
-    moveAllUnits(game, playerId, profile);
+    moveAllUnits(game, playerId, profile, difficulty);
+
+    // Second wave: spend leftover cash and push again
+    if (difficulty === 'expert' || difficulty === 'hard') {
+      for (const prov of provincesOfPlayer(game.provinces, playerId)) {
+        maybeSummon(game, prov.id, profile, difficulty);
+      }
+      moveAllUnits(game, playerId, profile, difficulty);
+    }
+
+    // Bankroll ally with whatever is left after the war economy
+    if (profile.aidAllies) {
+      maybeAidAllies(game, playerId, difficulty);
+    }
+
     game.clearSelection();
   } finally {
     game.endBatch();
   }
 }
 
-function moveAllUnits(game: Game, playerId: PlayerId, profile: AiProfile): void {
+function moveAllUnits(
+  game: Game,
+  playerId: PlayerId,
+  profile: AiProfile,
+  difficulty: AiDifficulty,
+): void {
   const unitKeys: string[] = [];
   for (const prov of provincesOfPlayer(game.provinces, playerId)) {
     for (const key of prov.hexes) {
       const u = game.cells[key].unit;
       if (u && u.owner === playerId && !u.moved) unitKeys.push(key);
+    }
+  }
+  // Also units standing on ally land
+  for (const key in game.cells) {
+    const u = game.cells[key].unit;
+    if (u && u.owner === playerId && !u.moved && !unitKeys.includes(key)) {
+      unitKeys.push(key);
     }
   }
 
@@ -177,10 +221,33 @@ function moveAllUnits(game: Game, playerId: PlayerId, profile: AiProfile): void 
       chosen = top[Math.floor(Math.random() * top.length)]!.t;
     }
 
-    const shouldMove =
-      profile.alwaysMove
-        ? bestScore > 0
-        : bestScore >= 8 || Math.random() < profile.aggression;
+    const threshold = profile.alwaysMove ? profile.moveThreshold : 8;
+    const shouldMove = profile.alwaysMove
+      ? bestScore > threshold
+      : bestScore >= 8 || Math.random() < profile.aggression;
+
+    // Expert: never sit still if any capture/expand target exists
+    if (
+      !shouldMove &&
+      difficulty === 'expert' &&
+      targets.some((t) => {
+        const c = game.cells[t];
+        return c && (c.owner === 0 || (c.owner !== playerId && !game.isAlly(playerId, c.owner)));
+      })
+    ) {
+      const offensive = targets
+        .map((t) => ({ t, s: scoreMove(game, playerId, fromKey, t, profile) }))
+        .filter(({ t }) => {
+          const c = game.cells[t];
+          return c && (c.owner === 0 || (c.owner !== playerId && !game.isAlly(playerId, c.owner)));
+        })
+        .sort((a, b) => b.s - a.s);
+      if (offensive.length) {
+        game.moveUnitTo(fromKey, offensive[0]!.t);
+        moved += 1;
+        continue;
+      }
+    }
 
     if (shouldMove) {
       game.moveUnitTo(fromKey, chosen);
@@ -212,7 +279,8 @@ function scoreMove(
       for (const n of hexNeighbors(cell.q, cell.r)) {
         const nc = game.cells[cellKey(n.q, n.r)];
         if (nc && nc.owner !== 0 && nc.owner !== playerId && !game.isAlly(playerId, nc.owner)) {
-          s += 10 * profile.aggression;
+          s += 14 * profile.aggression;
+          s += targetPriorityBonus(game, playerId, nc.owner, profile);
           break;
         }
       }
@@ -221,6 +289,7 @@ function scoreMove(
     const myHexes = myProv?.hexes ?? [];
     const bottled = isContained(game, myHexes, playerId);
     s += 55 * profile.aggression;
+    s += targetPriorityBonus(game, playerId, cell.owner, profile);
     // Prefer cuts that destroy / approach enemy economy & barracks
     s += enemyAssetValue(cell.building, bottled) * profile.aggression;
     s += approachEnemyAssetsBonus(game, playerId, toKey) * profile.aggression;
@@ -267,6 +336,15 @@ function scoreMove(
     s += approachEnemyAssetsBonus(game, playerId, toKey) * 0.85 * profile.aggression;
     // Prefer neutrals that keep a wide frontier (harder to bottle)
     s += neutralFrontierValue(game, toKey) * profile.aggression;
+    // Expert: race for land that touches the human / biggest rival
+    if (profile.focusHuman) {
+      for (const n of hexNeighbors(cell.q, cell.r)) {
+        const nc = game.cells[cellKey(n.q, n.r)];
+        if (!nc || nc.owner === 0 || nc.owner === playerId) continue;
+        if (game.isAlly(playerId, nc.owner)) continue;
+        s += targetPriorityBonus(game, playerId, nc.owner, profile) * 0.45;
+      }
+    }
     return s;
   }
 
@@ -389,18 +467,26 @@ function maybeSummon(
       units + training === 0 ||
       threatened ||
       needCounter ||
-      live.money >= cost * 2;
+      live.money >= cost * 2 ||
+      (difficulty === 'expert' && (enemyMax >= 1 || live.money >= cost + 4));
 
     const want =
       forceRecruit ||
       units + training < armyCap ||
-      live.money > cost + 16 + profile.reserveMoney;
+      live.money > cost + 16 + profile.reserveMoney ||
+      (difficulty === 'expert' && live.money >= cost && idleRecruitOk(net, rank, difficulty));
 
     if (!want) continue;
     if (Math.random() < profile.mistakeChance * 0.4) continue;
 
     game.summonAt(key);
   }
+}
+
+function idleRecruitOk(net: number, rank: UnitRank, difficulty: AiDifficulty): boolean {
+  if (difficulty !== 'expert') return false;
+  // Expert keeps pumping troops while upkeep is sustainable-ish
+  return net >= UNIT_UPKEEP[rank] * 0.5 || rank <= 2;
 }
 
 function countOwnedUnits(game: Game, hexes: string[], owner: PlayerId): number {
@@ -410,6 +496,94 @@ function countOwnedUnits(game: Game, hexes: string[], owner: PlayerId): number {
     if (u && u.owner === owner) n += 1;
   }
   return n;
+}
+
+/** Prefer humans and the largest enemy nation when choosing attack targets. */
+function targetPriorityBonus(
+  game: Game,
+  playerId: PlayerId,
+  targetOwner: PlayerId,
+  profile: AiProfile,
+): number {
+  if (!profile.focusHuman) return 0;
+  const target = game.players.find((p) => p.id === targetOwner);
+  if (!target || targetOwner === 0) return 0;
+
+  let bonus = 0;
+  if (target.isHuman) bonus += 48 * profile.aggression;
+
+  let targetHexes = 0;
+  let maxEnemyHexes = 0;
+  for (const p of game.players) {
+    if (!p.alive || p.id === playerId || p.id === 0) continue;
+    if (game.isAlly(playerId, p.id)) continue;
+    const size = provincesOfPlayer(game.provinces, p.id).reduce((n, pr) => n + pr.hexes.length, 0);
+    if (p.id === targetOwner) targetHexes = size;
+    if (size > maxEnemyHexes) maxEnemyHexes = size;
+  }
+  if (targetHexes > 0 && targetHexes >= maxEnemyHexes) {
+    bonus += 22 * profile.aggression;
+  } else if (targetHexes > 0) {
+    bonus += Math.min(18, targetHexes * 0.6) * profile.aggression;
+  }
+  return bonus;
+}
+
+/** Expert/Hard: feed surplus coins (and spare units) to the neediest ally. */
+function maybeAidAllies(game: Game, playerId: PlayerId, difficulty: AiDifficulty): void {
+  const allies = game.players.filter(
+    (p) => p.alive && p.id !== playerId && game.isAlly(playerId, p.id),
+  );
+  if (allies.length === 0) return;
+
+  const mine = provincesOfPlayer(game.provinces, playerId).sort((a, b) => b.money - a.money);
+  if (mine.length === 0) return;
+  const rich = mine[0]!;
+  const keep = difficulty === 'expert' ? 18 : 28;
+  if (rich.money <= keep) return;
+
+  let bestAllyProv: Province | null = null;
+  let bestScore = Infinity;
+  for (const ally of allies) {
+    for (const prov of provincesOfPlayer(game.provinces, ally.id)) {
+      const score = prov.money + prov.hexes.length * 2;
+      // Prefer human allies and the poorest provinces
+      const humanBias = ally.isHuman ? -40 : 0;
+      const adj = score + humanBias;
+      if (adj < bestScore) {
+        bestScore = adj;
+        bestAllyProv = prov;
+      }
+    }
+  }
+  if (!bestAllyProv) return;
+
+  const gift = Math.floor((rich.money - keep) * (difficulty === 'expert' ? 0.55 : 0.35));
+  if (gift < 8) return;
+  game.transferMoney(rich.id, bestAllyProv.id, gift);
+
+  // Gift a spare high-rank unit parked on ally land near enemies (expert only)
+  if (difficulty !== 'expert') return;
+  for (const key in game.cells) {
+    const cell = game.cells[key];
+    const u = cell.unit;
+    if (!u || u.owner !== playerId || u.moved) continue;
+    if (cell.owner === playerId || cell.owner === 0) continue;
+    if (!game.isAlly(playerId, cell.owner)) continue;
+    if (u.rank < 2) continue;
+    let touchesEnemy = false;
+    for (const n of hexNeighbors(cell.q, cell.r)) {
+      const nc = game.cells[cellKey(n.q, n.r)];
+      if (nc && nc.owner !== 0 && nc.owner !== playerId && !game.isAlly(playerId, nc.owner)) {
+        touchesEnemy = true;
+        break;
+      }
+    }
+    if (touchesEnemy) {
+      game.giftUnit(key, cell.owner);
+      break;
+    }
+  }
 }
 
 function maxEnemyUnitRank(game: Game, owner: PlayerId): number {
@@ -732,24 +906,28 @@ function maybeBuild(
 
     const needFarms = Math.max(0, rank - 2);
     const cost = HOUSE_COST[rank];
-    if (prov.money < cost + profile.reserveMoney) continue;
+    const expertRush = difficulty === 'expert' && rank <= 2 && farms >= 1;
+    if (prov.money < cost + (expertRush ? 0 : profile.reserveMoney)) continue;
 
     const counterEnemy =
       enemyMax >= rank - 1 ||
       (rank >= 3 && enemyMax >= 2) ||
-      (needBreak > 0 && rank >= needBreak);
+      (needBreak > 0 && rank >= needBreak) ||
+      expertRush;
     const economyOk =
       farms >= needFarms ||
       net >= rank * 2 ||
       prov.money >= cost * 1.35 ||
-      (needBreak > 0 && rank >= needBreak);
+      (needBreak > 0 && rank >= needBreak) ||
+      expertRush;
     const armyGateOk =
       rank === 2 ||
       !underArmed ||
       counterEnemy ||
       bottled ||
       net >= rank * 3 ||
-      prov.money >= cost + UNIT_COST[rank] + 20;
+      prov.money >= cost + UNIT_COST[rank] + 20 ||
+      difficulty === 'expert';
 
     if (!economyOk || !armyGateOk) continue;
     if (
@@ -757,7 +935,8 @@ function maybeBuild(
       farms < needFarms &&
       !counterEnemy &&
       !bottled &&
-      net < rank * 2
+      net < rank * 2 &&
+      difficulty !== 'expert'
     ) {
       continue;
     }
@@ -877,10 +1056,11 @@ function tryBuildFarm(
   }
 
   const interiorHexes = prov.hexes.filter((h) => !isBorderHex(game, h, prov.owner)).length;
+  const farmMul = profile.preferEconomy >= 0.9 ? 0.8 : 0.6;
   const farmTarget = Math.max(
     2,
-    Math.floor(interiorHexes * 0.6),
-    Math.floor(prov.hexes.length / 3),
+    Math.floor(interiorHexes * farmMul),
+    Math.floor(prov.hexes.length / (profile.preferEconomy >= 0.9 ? 2.5 : 3)),
   );
   const wantFarm = farms < farmTarget || net < 4 + profile.preferEconomy * 4;
   if (!wantFarm) return false;
@@ -914,7 +1094,12 @@ function tryBuildFarm(
   return place(game, pickBuildHex(game, pool, false), 'buildFarm');
 }
 
-function maybeBuildFarmOnly(game: Game, provinceId: number, profile: AiProfile): void {
+function maybeBuildFarmOnly(
+  game: Game,
+  provinceId: number,
+  profile: AiProfile,
+  _difficulty: AiDifficulty,
+): void {
   const prov = game.provinces.find((p) => p.id === provinceId);
   if (!prov || prov.owner !== game.currentPlayerId) return;
 

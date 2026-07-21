@@ -23,7 +23,6 @@ export interface MenuState {
   playerCount: number;
   humanCount: number;
   mapSize: MapSizeId;
-  aiDifficulty: AiDifficultyId;
   /** Target forest coverage 0–100%. */
   forestDensity: number;
   /** Tree spread speed each full turn 0–100%. */
@@ -38,7 +37,6 @@ export function defaultMenuState(): MenuState {
     playerCount,
     humanCount,
     mapSize: 'medium',
-    aiDifficulty: 'normal',
     forestDensity: DEFAULT_FOREST_DENSITY,
     forestSpread: DEFAULT_FOREST_SPREAD,
     players: Array.from({ length: playerCount }, (_, i) =>
@@ -70,7 +68,7 @@ export function syncPlayers(state: MenuState): void {
     if (next[i].isHuman) {
       delete next[i].aiDifficulty;
     } else if (!next[i].aiDifficulty) {
-      next[i].aiDifficulty = state.aiDifficulty as AiDifficulty;
+      next[i].aiDifficulty = 'normal';
     }
   }
   state.players = next;
@@ -78,12 +76,15 @@ export function syncPlayers(state: MenuState): void {
 
 export function menuToConfig(state: MenuState): GameConfig {
   syncPlayers(state);
+  // Global fallback for older call sites; each AI nation uses its own difficulty.
+  const aiFallback =
+    state.players.find((p) => !p.isHuman)?.aiDifficulty ?? ('normal' as AiDifficulty);
   return {
     mapRadius: mapRadiusFromSize(state.mapSize),
     playerCount: state.playerCount,
     seed: (Math.random() * 1e9) | 0,
     players: state.players.map((p) => ({ ...p })),
-    aiDifficulty: state.aiDifficulty as AiDifficulty,
+    aiDifficulty: aiFallback,
     forestDensity: clampForestDensity(state.forestDensity ?? DEFAULT_FOREST_DENSITY),
     forestSpread: clampForestSpread(state.forestSpread ?? DEFAULT_FOREST_SPREAD),
   };
@@ -104,8 +105,6 @@ export function mountMenu(
 
   function render(): void {
     syncPlayers(state);
-    const diffHint =
-      AI_DIFFICULTY_PRESETS.find((d) => d.id === state.aiDifficulty)?.hint ?? '';
     el.innerHTML = `
       <div class="menu-card">
         <div class="menu-hero">
@@ -161,18 +160,6 @@ export function mountMenu(
             <b>${clampForestSpread(state.forestSpread)}%</b>
             <em class="field-hint">Как быстро деревья захватывают соседние клетки каждый ход (0 — не растут)</em>
           </label>
-          <label class="field field-wide">
-            <span>Сложность ИИ (по умолчанию)</span>
-            <div class="seg">
-              ${AI_DIFFICULTY_PRESETS.map(
-                (d) => `
-                <button type="button" class="seg-btn ${state.aiDifficulty === d.id ? 'active' : ''}" data-diff="${d.id}">
-                  ${d.label}
-                </button>`,
-              ).join('')}
-            </div>
-            <em class="field-hint">${diffHint}. Меняет сложность всех ИИ-государств; у каждого можно задать свою ниже.</em>
-          </label>
         </div>
 
         <h3 class="menu-section">Государства</h3>
@@ -200,7 +187,7 @@ export function mountMenu(
                 <span>Сложность</span>
                 <select data-ai-diff="${i}" aria-label="Сложность ИИ ${i + 1}">
                   ${AI_DIFFICULTY_PRESETS.map((d) => {
-                    const cur = (p.aiDifficulty ?? state.aiDifficulty) as AiDifficultyId;
+                    const cur = (p.aiDifficulty ?? 'normal') as AiDifficultyId;
                     return `<option value="${d.id}" ${cur === d.id ? 'selected' : ''}>${d.label}</option>`;
                   }).join('')}
                 </select>
@@ -210,7 +197,7 @@ export function mountMenu(
             )
             .join('')}
         </div>
-        <em class="field-hint">Одинаковый номер команды — союзники: ходят по земле друг друга, могут переводить монеты и юнитов. Победа засчитывается всей команде.</em>
+        <em class="field-hint">Одинаковый номер команды — союзники: ходят по земле друг друга, могут переводить монеты и юнитов. Победа засчитывается всей команде. Сложность задаётся отдельно для каждого ИИ.</em>
 
         <div class="menu-legend">
           <div class="legend-item"><canvas data-preview="unit1" width="110" height="56"></canvas><span>1 — ополченец (охотник) ×1, стак до ×N</span></div>
@@ -257,16 +244,6 @@ export function mountMenu(
     el.querySelectorAll<HTMLButtonElement>('[data-map]').forEach((btn) => {
       btn.addEventListener('click', () => {
         state.mapSize = btn.dataset.map as MapSizeId;
-        render();
-      });
-    });
-
-    el.querySelectorAll<HTMLButtonElement>('[data-diff]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        state.aiDifficulty = btn.dataset.diff as AiDifficultyId;
-        for (const p of state.players) {
-          if (!p.isHuman) p.aiDifficulty = state.aiDifficulty as AiDifficulty;
-        }
         render();
       });
     });

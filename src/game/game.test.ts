@@ -50,14 +50,16 @@ describe('Start menu config', () => {
     state.playerCount = 5;
     state.humanCount = 2;
     state.mapSize = 'large';
-    state.aiDifficulty = 'hard';
     syncPlayers(state);
     state.players[0].name = 'Тестовая Республика';
     state.players[0].color = '#112233';
+    state.players[2].aiDifficulty = 'hard';
+    state.players[3].aiDifficulty = 'hard';
+    state.players[4].aiDifficulty = 'hard';
     const config = menuToConfig(state);
     expect(config.playerCount).toBe(5);
     expect(config.mapRadius).toBe(12);
-    expect(config.aiDifficulty).toBe('hard');
+    expect(config.players[2].aiDifficulty).toBe('hard');
     expect(config.players.filter((p) => p.isHuman)).toHaveLength(2);
     expect(config.players[0].name).toBe('Тестовая Республика');
 
@@ -67,7 +69,7 @@ describe('Start menu config', () => {
     expect(g.players[0].color).toBe('#112233');
     expect(g.players[1].isHuman).toBe(true);
     expect(g.players[2].isHuman).toBe(false);
-    expect(g.config.aiDifficulty).toBe('hard');
+    expect(g.aiDifficultyFor(3)).toBe('hard');
   });
 
   it('maps Гигантская size to 3× Огромная radius', () => {
@@ -104,7 +106,6 @@ describe('Start menu config', () => {
     const state = defaultMenuState();
     state.playerCount = 4;
     state.humanCount = 1;
-    state.aiDifficulty = 'normal';
     syncPlayers(state);
     state.players[1].aiDifficulty = 'easy';
     state.players[2].aiDifficulty = 'hard';
@@ -116,10 +117,19 @@ describe('Start menu config', () => {
     expect(config.players[0].aiDifficulty).toBeUndefined();
 
     const g = new Game(config);
-    expect(g.aiDifficultyFor(1)).toBe('normal'); // human falls back to config
+    expect(g.aiDifficultyFor(1)).toBe(config.aiDifficulty); // human falls back to config
     expect(g.aiDifficultyFor(2)).toBe('easy');
     expect(g.aiDifficultyFor(3)).toBe('hard');
     expect(g.aiDifficultyFor(4)).toBe('expert');
+  });
+
+  it('has no global difficulty field in menu state', () => {
+    const state = defaultMenuState();
+    expect('aiDifficulty' in state).toBe(false);
+    syncPlayers(state);
+    expect(state.players.filter((p) => !p.isHuman).every((p) => p.aiDifficulty === 'normal')).toBe(
+      true,
+    );
   });
 });
 
@@ -706,7 +716,7 @@ describe('Economy', () => {
     }
   });
 
-  it('Expert AI farms grant +1 income over normal farms', () => {
+  it('Expert AI farms grant +2 income over normal farms', () => {
     const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
     const g = new Game({
       mapRadius: 6,
@@ -751,6 +761,40 @@ describe('Economy', () => {
 
     g.players[0].aiDifficulty = 'hard';
     expect(g.farmBonusFor(1)).toBe(0);
+  });
+
+  it('Expert AI transfers surplus money to a poorer ally', () => {
+    const players = Array.from({ length: 3 }, (_, i) => defaultPlayerSetup(i, false));
+    players[0].teamId = 1;
+    players[0].aiDifficulty = 'expert';
+    players[1].teamId = 1;
+    players[1].isHuman = true;
+    players[2].teamId = 2;
+    const g = new Game({
+      mapRadius: 6,
+      playerCount: 3,
+      seed: 17,
+      players,
+      aiDifficulty: 'expert',
+    });
+    g.currentPlayerId = 1;
+    const mine = g.provinces.find((p) => p.owner === 1)!;
+    // No recruit/build spend: only castle + farms, no empty slots or houses
+    for (const h of mine.hexes) {
+      const c = g.cells[h];
+      c.unit = null;
+      c.training = null;
+      if (c.building !== 'castle') c.building = 'farm';
+    }
+    mine.money = 200;
+    const allyBefore = g.provinces
+      .filter((p) => p.owner === 2)
+      .reduce((n, p) => n + p.money, 0);
+    runAiTurn(g, 1);
+    const allyAfter = g.provinces
+      .filter((p) => p.owner === 2)
+      .reduce((n, p) => n + p.money, 0);
+    expect(allyAfter).toBeGreaterThan(allyBefore);
   });
 });
 
