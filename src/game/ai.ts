@@ -1,4 +1,5 @@
 import {
+  BUILDING_PROTECTION,
   HOUSE_COST,
   STRONG_TOWER_COST,
   TOWER_COST,
@@ -13,6 +14,7 @@ import { hexNeighbors } from './hex';
 import {
   cellKey,
   type AiDifficulty,
+  type BuildingKind,
   type HouseRank,
   type PlayerId,
   type SelectionMode,
@@ -53,36 +55,36 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
     skipMoveChance: 0.05,
     buildPasses: 2,
     reserveMoney: 6,
-    aggression: 0.8,
+    aggression: 0.85,
     preferEconomy: 0.7,
-    maxMoves: 18,
+    maxMoves: 20,
     alwaysMove: false,
     expandFirst: true,
-    armyDensity: 0.35,
+    armyDensity: 0.4,
   },
   hard: {
     mistakeChance: 0.01,
     skipMoveChance: 0,
-    buildPasses: 3,
-    reserveMoney: 3,
-    aggression: 1,
-    preferEconomy: 0.55,
-    maxMoves: 32,
+    buildPasses: 4,
+    reserveMoney: 2,
+    aggression: 1.1,
+    preferEconomy: 0.6,
+    maxMoves: 40,
     alwaysMove: true,
     expandFirst: true,
-    armyDensity: 0.45,
+    armyDensity: 0.5,
   },
   expert: {
     mistakeChance: 0,
     skipMoveChance: 0,
-    buildPasses: 5,
+    buildPasses: 6,
     reserveMoney: 0,
-    aggression: 1.15,
-    preferEconomy: 0.75,
-    maxMoves: 80,
+    aggression: 1.35,
+    preferEconomy: 0.7,
+    maxMoves: 100,
     alwaysMove: true,
     expandFirst: true,
-    armyDensity: 0.55,
+    armyDensity: 0.65,
   },
 };
 
@@ -211,10 +213,17 @@ function scoreMove(
       }
       return s;
     }
+    const myHexes = myProv?.hexes ?? [];
+    const bottled = isContained(game, myHexes, playerId);
     s += 55 * profile.aggression;
     // Prefer cuts that destroy / approach enemy economy & barracks
-    s += enemyAssetValue(cell.building) * profile.aggression;
+    s += enemyAssetValue(cell.building, bottled) * profile.aggression;
     s += approachEnemyAssetsBonus(game, playerId, toKey) * profile.aggression;
+    // Breakout: punching the seal / path to neutrals behind the wall
+    if (bottled) {
+      s += 35 * profile.aggression;
+      s += breakoutTowardNeutralBonus(game, playerId, toKey) * profile.aggression;
+    }
     if (cell.unit) {
       s += 14 + cell.unit.rank * 7;
       if (unit.rank > cell.unit.rank) s += 28;
@@ -222,7 +231,7 @@ function scoreMove(
         s += 16;
       }
     } else {
-      s += 10; // empty enemy land is free expansion
+      s += 10;
     }
     if (small) s += 25;
     if (profile.expandFirst) s += 12;
@@ -230,7 +239,7 @@ function scoreMove(
   }
 
   if (cell.owner === 0) {
-    s += 28 + profile.aggression * 16; // hard priority: claim neutrals
+    s += 28 + profile.aggression * 16;
     let touchesEnemy = false;
     let touchesMine = false;
     let enemyWeak = false;
@@ -250,8 +259,9 @@ function scoreMove(
     if (cell.tree) s += 2 * profile.preferEconomy;
     if (small) s += 20;
     if (profile.expandFirst) s += 14;
-    // Neutrals that open a path toward enemy farms/houses/castle
     s += approachEnemyAssetsBonus(game, playerId, toKey) * 0.85 * profile.aggression;
+    // Prefer neutrals that keep a wide frontier (harder to bottle)
+    s += neutralFrontierValue(game, toKey) * profile.aggression;
     return s;
   }
 
@@ -318,12 +328,24 @@ function maybeSummon(
   const training = prov.hexes.filter((h) => game.cells[h].training).length;
   const threatened = isThreatened(game, prov.hexes, prov.owner);
   const expanding = hasNeutralAdjacent(game, prov.hexes, prov.owner);
+  const bottled = isContained(game, prov.hexes, prov.owner);
+  const wallDef = enemyBorderDefense(game, prov.hexes, prov.owner);
+  const needBreak = bottled || wallDef >= 2 ? breakRankNeeded(wallDef) : 0;
   const net = netIncome(game.cells, prov);
   const armyCap = Math.max(
     1,
-    Math.ceil(prov.hexes.length * (expanding ? Math.max(profile.armyDensity, 0.55) : profile.armyDensity)),
+    Math.ceil(
+      prov.hexes.length *
+        (expanding || bottled
+          ? Math.max(profile.armyDensity, bottled ? 0.7 : 0.55)
+          : profile.armyDensity),
+    ),
   );
   const enemyMax = maxEnemyUnitRank(game, prov.owner);
+  const maxHouse = Math.max(
+    0,
+    ...houseKeys.map((h) => houseRankFromKind(game.cells[h].building!) ?? 0),
+  );
 
   for (const key of ordered) {
     const cell = game.cells[key];
@@ -334,15 +356,21 @@ function maybeSummon(
 
     const cost = UNIT_COST[rank];
     const reserve =
-      expanding || units + training === 0 ? 0 : profile.reserveMoney;
+      expanding || bottled || units + training === 0 ? 0 : profile.reserveMoney;
     if (live.money < cost + reserve) continue;
 
     if (difficulty === 'easy' && rank >= 3 && net < 4) continue;
 
-    const needCounter = enemyMax >= rank;
+    // When sealed behind towers: save for breakers, skip cheap militia spam if HQ exists
+    if (needBreak >= 3 && maxHouse >= needBreak && rank < needBreak && live.money < cost + UNIT_COST[needBreak as UnitRank]) {
+      continue;
+    }
+
+    const needCounter = enemyMax >= rank || (needBreak > 0 && rank >= needBreak);
     if (
       !needCounter &&
       !expanding &&
+      !bottled &&
       rank >= 3 &&
       net < UNIT_UPKEEP[rank] &&
       units + training >= armyCap
@@ -350,9 +378,9 @@ function maybeSummon(
       continue;
     }
 
-    // During expansion: recruit every turn from every idle house if affordable
     const forceRecruit =
       expanding ||
+      bottled ||
       units + training === 0 ||
       threatened ||
       needCounter ||
@@ -379,7 +407,6 @@ function countOwnedUnits(game: Game, hexes: string[], owner: PlayerId): number {
   return n;
 }
 
-/** Highest enemy unit rank visible on the map (0 if none). */
 function maxEnemyUnitRank(game: Game, owner: PlayerId): number {
   let max = 0;
   for (const key in game.cells) {
@@ -404,12 +431,59 @@ function hasNeutralAdjacent(game: Game, hexes: string[], owner: PlayerId): boole
   return false;
 }
 
-function enemyAssetValue(building: import('./types').BuildingKind | null): number {
+/** No neutrals left to grab and most of the border touches enemies — bottled up. */
+function isContained(game: Game, hexes: string[], owner: PlayerId): boolean {
+  if (hexes.length === 0) return false;
+  if (hasNeutralAdjacent(game, hexes, owner)) return false;
+  let border = 0;
+  let enemyTouch = 0;
+  for (const key of hexes) {
+    if (!isBorderHex(game, key, owner)) continue;
+    border += 1;
+    const c = game.cells[key];
+    for (const n of hexNeighbors(c.q, c.r)) {
+      const nc = game.cells[cellKey(n.q, n.r)];
+      if (nc && nc.owner !== 0 && nc.owner !== owner && !game.isAlly(owner, nc.owner)) {
+        enemyTouch += 1;
+        break;
+      }
+    }
+  }
+  return border > 0 && enemyTouch / border >= 0.45;
+}
+
+/** Strongest enemy fortification sitting on our border. */
+function enemyBorderDefense(game: Game, hexes: string[], owner: PlayerId): number {
+  let max = 0;
+  for (const key of hexes) {
+    const c = game.cells[key];
+    for (const n of hexNeighbors(c.q, c.r)) {
+      const nc = game.cells[cellKey(n.q, n.r)];
+      if (!nc || nc.owner === 0 || nc.owner === owner) continue;
+      if (game.isAlly(owner, nc.owner)) continue;
+      if (nc.building) {
+        max = Math.max(max, BUILDING_PROTECTION[nc.building] ?? 0);
+      }
+      if (nc.unit) max = Math.max(max, nc.unit.rank);
+    }
+  }
+  return max;
+}
+
+function breakRankNeeded(wallDef: number): UnitRank {
+  if (wallDef >= 3) return 4;
+  if (wallDef >= 2) return 3;
+  return 2;
+}
+
+function enemyAssetValue(building: BuildingKind | null, bottled = false): number {
   if (!building) return 0;
   if (building === 'castle') return 95;
   if (isHouseBuilding(building)) return 60;
   if (building === 'farm') return 42;
-  if (building === 'tower' || building === 'strongTower') return 18;
+  // Towers are the seal — worth much more when bottled
+  if (building === 'tower') return bottled ? 70 : 28;
+  if (building === 'strongTower') return bottled ? 85 : 34;
   return 0;
 }
 
@@ -419,7 +493,6 @@ function approachEnemyAssetsBonus(game: Game, playerId: PlayerId, toKey: string)
   if (!start) return 0;
 
   let best = 0;
-  // Immediate adjacency to valuable enemy buildings
   for (const n of hexNeighbors(start.q, start.r)) {
     const nc = game.cells[cellKey(n.q, n.r)];
     if (!nc || nc.owner === 0 || nc.owner === playerId) continue;
@@ -427,7 +500,6 @@ function approachEnemyAssetsBonus(game: Game, playerId: PlayerId, toKey: string)
     best = Math.max(best, enemyAssetValue(nc.building) * 0.55);
   }
 
-  // Short BFS through enemy land toward assets (depth ≤ 4)
   const queue: { key: string; dist: number }[] = [{ key: toKey, dist: 0 }];
   const seen = new Set<string>([toKey]);
   while (queue.length) {
@@ -439,18 +511,62 @@ function approachEnemyAssetsBonus(game: Game, playerId: PlayerId, toKey: string)
       if (seen.has(nk)) continue;
       const nc = game.cells[nk];
       if (!nc) continue;
-      // Walk enemy territory (or the just-captured hex)
       if (nc.owner !== 0 && nc.owner !== playerId && !game.isAlly(playerId, nc.owner)) {
         seen.add(nk);
         const asset = enemyAssetValue(nc.building);
-        if (asset > 0) {
-          best = Math.max(best, asset * (1 - dist * 0.18));
-        }
+        if (asset > 0) best = Math.max(best, asset * (1 - dist * 0.18));
         queue.push({ key: nk, dist: dist + 1 });
       }
     }
   }
   return best;
+}
+
+/** After capturing this enemy hex, how soon do we reach open neutrals? */
+function breakoutTowardNeutralBonus(game: Game, playerId: PlayerId, toKey: string): number {
+  const queue: { key: string; dist: number }[] = [{ key: toKey, dist: 0 }];
+  const seen = new Set<string>([toKey]);
+  while (queue.length) {
+    const { key, dist } = queue.shift()!;
+    if (dist > 5) continue;
+    const cell = game.cells[key];
+    for (const n of hexNeighbors(cell.q, cell.r)) {
+      const nk = cellKey(n.q, n.r);
+      if (seen.has(nk)) continue;
+      const nc = game.cells[nk];
+      if (!nc) continue;
+      if (nc.owner === 0) return 55 - dist * 8;
+      if (nc.owner !== playerId && !game.isAlly(playerId, nc.owner)) {
+        seen.add(nk);
+        queue.push({ key: nk, dist: dist + 1 });
+      }
+    }
+  }
+  return 0;
+}
+
+/** How many neutrals open up if we claim this hex (wide frontier). */
+function neutralFrontierValue(game: Game, toKey: string): number {
+  const start = game.cells[toKey];
+  if (!start) return 0;
+  let count = 0;
+  const seen = new Set<string>([toKey]);
+  const queue: { key: string; dist: number }[] = [{ key: toKey, dist: 0 }];
+  while (queue.length) {
+    const { key, dist } = queue.shift()!;
+    if (dist >= 3) continue;
+    const cell = game.cells[key];
+    for (const n of hexNeighbors(cell.q, cell.r)) {
+      const nk = cellKey(n.q, n.r);
+      if (seen.has(nk)) continue;
+      const nc = game.cells[nk];
+      if (!nc || nc.owner !== 0) continue;
+      seen.add(nk);
+      count += 1;
+      queue.push({ key: nk, dist: dist + 1 });
+    }
+  }
+  return Math.min(22, count * 2.2);
 }
 
 function isThreatened(game: Game, hexes: string[], owner: PlayerId): boolean {
@@ -573,12 +689,15 @@ function maybeBuild(
     units + training < Math.max(1, Math.ceil(prov.hexes.length * profile.armyDensity));
   const enemyMax = maxEnemyUnitRank(game, prov.owner);
   const expanding = hasNeutralAdjacent(game, prov.hexes, prov.owner);
+  const bottled = isContained(game, prov.hexes, prov.owner);
+  const wallDef = enemyBorderDefense(game, prov.hexes, prov.owner);
+  const needBreak = bottled || wallDef >= 2 ? breakRankNeeded(wallDef) : 0;
   const borderSlots = buildable.filter((h) => isBorderHex(game, h, prov.owner));
   const hotBorderSlots = buildable.filter((h) => isHotBorderHex(game, h, prov.owner));
   const interiorSlots = buildable.filter((h) => !isBorderHex(game, h, prov.owner));
   const borderHexes = prov.hexes.filter((h) => isBorderHex(game, h, prov.owner)).length;
   // One tower per ~2 border hexes (spacing handled separately)
-  const towerCap = Math.max(hotFront ? 1 : 0, Math.ceil(borderHexes / 2));
+  const towerCap = Math.max(hotFront || bottled ? 1 : 0, Math.ceil(borderHexes / 2));
 
   // --- Opening: farms on all but one free cell, then house on the last ---
   if (houses.length === 0) {
@@ -601,7 +720,7 @@ function maybeBuild(
     return;
   }
 
-  // --- Tech up houses to counter enemy ranks (priority over towers) ---
+  // --- Tech up houses (emergency HQ/factory when bottled behind towers) ---
   for (const rank of [4, 3, 2] as HouseRank[]) {
     const has = houses.some((h) => houseRankFromKind(game.cells[h].building!) === rank);
     if (has) continue;
@@ -610,17 +729,33 @@ function maybeBuild(
     const cost = HOUSE_COST[rank];
     if (prov.money < cost + profile.reserveMoney) continue;
 
-    const counterEnemy = enemyMax >= rank - 1 || (rank >= 3 && enemyMax >= 2);
-    const economyOk = farms >= needFarms || net >= rank * 2 || prov.money >= cost * 1.5;
+    const counterEnemy =
+      enemyMax >= rank - 1 ||
+      (rank >= 3 && enemyMax >= 2) ||
+      (needBreak > 0 && rank >= needBreak);
+    const economyOk =
+      farms >= needFarms ||
+      net >= rank * 2 ||
+      prov.money >= cost * 1.35 ||
+      (needBreak > 0 && rank >= needBreak);
     const armyGateOk =
       rank === 2 ||
       !underArmed ||
       counterEnemy ||
+      bottled ||
       net >= rank * 3 ||
       prov.money >= cost + UNIT_COST[rank] + 20;
 
     if (!economyOk || !armyGateOk) continue;
-    if (rank >= 3 && farms < needFarms && !counterEnemy && net < rank * 2) continue;
+    if (
+      rank >= 3 &&
+      farms < needFarms &&
+      !counterEnemy &&
+      !bottled &&
+      net < rank * 2
+    ) {
+      continue;
+    }
 
     if (
       place(
@@ -639,7 +774,7 @@ function maybeBuild(
     freeSlots > 1 &&
     prov.money >= HOUSE_COST[1] + 12 + profile.reserveMoney &&
     net >= 5 &&
-    (!underArmed || enemyMax >= 2)
+    (!underArmed || enemyMax >= 2 || bottled)
   ) {
     if (
       place(
@@ -653,17 +788,27 @@ function maybeBuild(
   }
 
   // --- Defense on border, spaced every other cell ---
-  if (towers < towerCap && (hotBorderSlots.length > 0 || (hotFront && borderSlots.length > 0))) {
+  if (
+    towers < towerCap &&
+    (hotBorderSlots.length > 0 || ((hotFront || bottled) && borderSlots.length > 0))
+  ) {
     const rawPool = hotBorderSlots.length ? hotBorderSlots : borderSlots;
     const pool = rawPool.filter((h) => !adjacentToTower(game, h));
     if (pool.length) {
       const canStrong =
         prov.money >= STRONG_TOWER_COST + profile.reserveMoney &&
-        (hotFront || profile.aggression >= 1);
+        (hotFront || bottled || profile.aggression >= 1);
       const canTower = prov.money >= TOWER_COST + Math.floor(profile.reserveMoney * 0.2);
-      if (canStrong || canTower) {
+      // When saving for breakout HQ, don't dump cash into own towers
+      const savingForBreak =
+        needBreak >= 3 &&
+        !houses.some((h) => (houseRankFromKind(game.cells[h].building!) ?? 0) >= needBreak) &&
+        prov.money < HOUSE_COST[needBreak as HouseRank] + 30;
+      if (!savingForBreak && (canStrong || canTower)) {
         const mode: SelectionMode =
-          canStrong && (hotFront || towers === 0) ? 'buildStrongTower' : 'buildTower';
+          canStrong && (hotFront || bottled || towers === 0)
+            ? 'buildStrongTower'
+            : 'buildTower';
         if (mode === 'buildStrongTower' || canTower) {
           if (place(game, pickBuildHex(game, pool, true), mode)) return;
         }
@@ -671,13 +816,22 @@ function maybeBuild(
     }
   }
 
-  // --- Farms (economy), especially while still expanding ---
+  // --- Farms: skip / limit while saving for breakout HQ ---
+  const savingForBreak =
+    needBreak >= 3 &&
+    !houses.some((h) => (houseRankFromKind(game.cells[h].building!) ?? 0) >= needBreak);
+  if (savingForBreak && prov.money < HOUSE_COST[needBreak as HouseRank] + 40) {
+    // Only farm if very poor income — otherwise bank for HQ/factory
+    if (net >= 6) return;
+  }
+
   if (
     !profile.expandFirst ||
     pass >= profile.buildPasses - 2 ||
     !underArmed ||
     net < 4 ||
-    expanding
+    expanding ||
+    bottled
   ) {
     if (tryBuildFarm(game, provinceId, profile, interiorSlots, buildable)) return;
   } else if (difficulty !== 'expert' && pass === profile.buildPasses - 1) {
@@ -734,8 +888,22 @@ function tryBuildFarm(
   }
 
   const cost = farmCost(game.cells, prov);
-  // Keep cash for a unit when expanding
-  const reserve = expanding && idleHouse ? UNIT_COST[1] : Math.floor(profile.reserveMoney * 0.2);
+  const bottled = isContained(game, prov.hexes, prov.owner);
+  const wallDef = enemyBorderDefense(game, prov.hexes, prov.owner);
+  const needBreak = bottled || wallDef >= 2 ? breakRankNeeded(wallDef) : 0;
+  const hasBreaker = houses.some(
+    (h) => (houseRankFromKind(game.cells[h].building!) ?? 0) >= Math.max(needBreak, 3),
+  );
+  // Bank for HQ/factory instead of endless farms while sealed
+  if (needBreak >= 3 && !hasBreaker && prov.money >= HOUSE_COST[3] - 10) {
+    return false;
+  }
+  const reserve =
+    expanding && idleHouse
+      ? UNIT_COST[1]
+      : bottled && !hasBreaker
+        ? Math.min(prov.money, HOUSE_COST[3] * 0.15)
+        : Math.floor(profile.reserveMoney * 0.2);
   if (prov.money < cost + reserve) return false;
 
   return place(game, pickBuildHex(game, pool, false), 'buildFarm');

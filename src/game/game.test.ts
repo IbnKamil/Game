@@ -445,6 +445,53 @@ describe('AI actions', () => {
     }
   });
 
+  it('when sealed by enemy towers, banks for house3/4 breakout', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    const g = new Game({
+      mapRadius: 7,
+      playerCount: 2,
+      seed: 19,
+      players,
+      aiDifficulty: 'expert',
+    });
+    g.currentPlayerId = 1;
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    for (const h of prov.hexes) {
+      const c = g.cells[h];
+      if (c.building !== 'castle') {
+        c.building = null;
+        c.training = null;
+        c.unit = null;
+        c.tree = false;
+      }
+    }
+    for (const h of [...prov.hexes]) {
+      const c = g.cells[h];
+      for (const n of hexNeighbors(c.q, c.r)) {
+        const nk = cellKey(n.q, n.r);
+        const nc = g.cells[nk];
+        if (!nc || nc.owner === 1) continue;
+        nc.owner = 2;
+        nc.unit = null;
+        nc.tree = false;
+        nc.building = 'tower';
+      }
+    }
+    const empties = prov.hexes.filter((h) => !g.cells[h].building);
+    g.cells[empties[0]!].building = 'house1';
+    if (empties[1]) g.cells[empties[1]].building = 'farm';
+    if (empties[2]) g.cells[empties[2]].building = 'farm';
+    prov.money = 200;
+
+    runAiTurn(g, 1);
+    const owned = Object.keys(g.cells).filter((k) => g.cells[k].owner === 1);
+    const high = owned.some((h) => {
+      const b = g.cells[h].building;
+      return b === 'house3' || b === 'house4';
+    });
+    expect(high).toBe(true);
+  });
+
   it('prefers interior farms and caps border towers instead of carpeting', () => {
     const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
     const g = new Game({
