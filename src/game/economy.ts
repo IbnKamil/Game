@@ -1,7 +1,6 @@
 import {
   BUILDING_INCOME_MOD,
   BUILDING_PROTECTION,
-  FARM_INCOME,
   FOREST_SPREAD_BASE_CHANCE,
   FOREST_SPREAD_PALM_CHANCE,
   INCOME_PER_HEX,
@@ -139,7 +138,11 @@ export function farmCost(cells: Record<string, HexCell>, province: Province): nu
   return 12 + 2 * countFarms(cells, province);
 }
 
-export function calcIncome(cells: Record<string, HexCell>, province: Province): number {
+export function calcIncome(
+  cells: Record<string, HexCell>,
+  province: Province,
+  farmBonusPerFarm = 0,
+): number {
   let income = 0;
   for (const key of province.hexes) {
     const cell = cells[key];
@@ -147,10 +150,8 @@ export function calcIncome(cells: Record<string, HexCell>, province: Province): 
     income += INCOME_PER_HEX;
     if (cell.building) {
       income += BUILDING_INCOME_MOD[cell.building];
-      // farm income already in BUILDING_INCOME_MOD; hex still counts
-      if (cell.building === 'farm') {
-        // BUILDING_INCOME_MOD already +4; hex +1 already counted
-        void FARM_INCOME;
+      if (cell.building === 'farm' && farmBonusPerFarm > 0) {
+        income += farmBonusPerFarm;
       }
     }
   }
@@ -183,8 +184,12 @@ export function calcForeignUnitUpkeep(
   return upkeep;
 }
 
-export function netIncome(cells: Record<string, HexCell>, province: Province): number {
-  return calcIncome(cells, province) - calcUpkeep(cells, province);
+export function netIncome(
+  cells: Record<string, HexCell>,
+  province: Province,
+  farmBonusPerFarm = 0,
+): number {
+  return calcIncome(cells, province, farmBonusPerFarm) - calcUpkeep(cells, province);
 }
 
 type AllyFn = (a: PlayerId, b: PlayerId) => boolean;
@@ -314,10 +319,11 @@ export function canMoveOntoFriendly(
 export function applyIncomeAndStarve(
   cells: Record<string, HexCell>,
   provinces: Province[],
+  farmBonusPerFarm = 0,
 ): string[] {
   const messages: string[] = [];
   for (const p of provinces) {
-    const net = netIncome(cells, p);
+    const net = netIncome(cells, p, farmBonusPerFarm);
     p.money += net;
     if (p.money < 0) {
       // Starve: kill all units in province, spawn trees

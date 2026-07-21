@@ -44,6 +44,8 @@ export const UNIT_FIGURE_COUNT: Record<UnitRank, number> = {
 export const FARM_BASE_COST = 12;
 export const FARM_COST_PER_EXISTING = 2;
 export const FARM_INCOME = 4;
+/** Extra coins per farm each turn for Expert AI only. */
+export const EXPERT_AI_FARM_BONUS = 1;
 
 export const TOWER_COST = 15;
 export const STRONG_TOWER_COST = 35;
@@ -129,7 +131,7 @@ export const AI_DIFFICULTY_PRESETS = [
   { id: 'easy', label: 'Лёгкий', hint: 'Ошибки, медленное развитие' },
   { id: 'normal', label: 'Обычный', hint: 'Домики, набор, давление' },
   { id: 'hard', label: 'Сложный', hint: 'Агрессия и экономика' },
-  { id: 'expert', label: 'Эксперт', hint: 'Жёсткая экспансия и давление' },
+  { id: 'expert', label: 'Эксперт', hint: 'Жёсткая экспансия; фермы +1🪙' },
 ] as const;
 
 export type AiDifficultyId = (typeof AI_DIFFICULTY_PRESETS)[number]['id'];

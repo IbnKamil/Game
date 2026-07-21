@@ -1,5 +1,6 @@
 import {
   DEFAULT_FOREST_SPREAD,
+  EXPERT_AI_FARM_BONUS,
   HOUSE_COST,
   HOUSE_TRAIN_TURNS,
   RECRUIT_LABEL,
@@ -298,7 +299,7 @@ export class Game {
       this.ui = { selectedKey: key, mode: 'none', hoverKey: this.ui.hoverKey };
       const prov = this.getProvince(key);
       if (prov) {
-        const net = netIncome(this.cells, prov);
+        const net = netIncome(this.cells, prov, this.farmBonusFor(prov.owner));
         this.message = `Провинция: ${prov.money}🪙 (доход ${net >= 0 ? '+' : ''}${net}/ход)`;
       }
       return;
@@ -616,6 +617,13 @@ export class Game {
     this.beginPlayerTurn(this.currentPlayerId);
   }
 
+  /** Extra farm income for Expert AI provinces. */
+  farmBonusFor(ownerId: PlayerId): number {
+    const p = this.players.find((x) => x.id === ownerId);
+    if (!p || p.isHuman) return 0;
+    return this.config.aiDifficulty === 'expert' ? EXPERT_AI_FARM_BONUS : 0;
+  }
+
   beginPlayerTurn(playerId: PlayerId): void {
     this.currentPlayerId = playerId;
     resetMovedFlags(this.cells, playerId);
@@ -626,6 +634,7 @@ export class Game {
     const msgs = applyIncomeAndStarve(
       this.cells,
       mine,
+      this.farmBonusFor(playerId),
     );
     // Units on ally/foreign land: charge richest own province
     const foreign = calcForeignUnitUpkeep(this.cells, playerId);

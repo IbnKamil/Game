@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runAiTurn } from './ai';
-import { HOUSE_COST, HOUSE_TRAIN_TURNS, UNIT_COST, defaultPlayerSetup } from './constants';
-import { canCapture, defenseStrength, netIncome, spreadTrees } from './economy';
+import { HOUSE_COST, HOUSE_TRAIN_TURNS, UNIT_COST, EXPERT_AI_FARM_BONUS, defaultPlayerSetup } from './constants';
+import { canCapture, calcIncome, defenseStrength, netIncome, spreadTrees } from './economy';
 import { Game } from './Game';
 import { hexNeighbors } from './hex';
 import { menuToConfig, defaultMenuState, syncPlayers } from './menu';
@@ -682,6 +682,35 @@ describe('Economy', () => {
       g.cells[empty].building = 'farm';
       expect(netIncome(g.cells, prov)).toBeGreaterThan(before);
     }
+  });
+
+  it('Expert AI farms grant +1 income over normal farms', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    const g = new Game({
+      mapRadius: 6,
+      playerCount: 2,
+      seed: 3,
+      players,
+      aiDifficulty: 'expert',
+    });
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    for (const h of prov.hexes) {
+      const c = g.cells[h];
+      if (c.building !== 'castle') {
+        c.building = null;
+        c.unit = null;
+        c.tree = false;
+      }
+    }
+    const slot = prov.hexes.find((h) => !g.cells[h].building)!;
+    g.cells[slot].building = 'farm';
+    const base = calcIncome(g.cells, prov, 0);
+    const expert = calcIncome(g.cells, prov, g.farmBonusFor(1));
+    expect(g.farmBonusFor(1)).toBe(EXPERT_AI_FARM_BONUS);
+    expect(expert - base).toBe(EXPERT_AI_FARM_BONUS);
+
+    g.players[0].isHuman = true;
+    expect(g.farmBonusFor(1)).toBe(0);
   });
 });
 

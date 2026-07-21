@@ -142,9 +142,10 @@ export function mountHud(root: HTMLElement): {
     const allies = human ? game.allies() : [];
 
     if (prov && prov.owner === game.currentPlayerId) {
-      const income = calcIncome(game.cells, prov);
+      const farmBonus = game.farmBonusFor(prov.owner);
+      const income = calcIncome(game.cells, prov, farmBonus);
       const upkeep = calcUpkeep(game.cells, prov);
-      const net = netIncome(game.cells, prov);
+      const net = netIncome(game.cells, prov, farmBonus);
       html += `
         <h3>Провинция</h3>
         <div class="stat-grid">

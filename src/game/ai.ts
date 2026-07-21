@@ -17,9 +17,14 @@ import {
   type BuildingKind,
   type HouseRank,
   type PlayerId,
+  type Province,
   type SelectionMode,
   type UnitRank,
 } from './types';
+
+function aiNet(game: Game, prov: Province): number {
+  return netIncome(game.cells, prov, game.farmBonusFor(prov.owner));
+}
 
 interface AiProfile {
   mistakeChance: number;
@@ -331,7 +336,7 @@ function maybeSummon(
   const bottled = isContained(game, prov.hexes, prov.owner);
   const wallDef = enemyBorderDefense(game, prov.hexes, prov.owner);
   const needBreak = bottled || wallDef >= 2 ? breakRankNeeded(wallDef) : 0;
-  const net = netIncome(game.cells, prov);
+  const net = aiNet(game, prov);
   const armyCap = Math.max(
     1,
     Math.ceil(
@@ -680,7 +685,7 @@ function maybeBuild(
     const b = game.cells[h].building;
     return b === 'tower' || b === 'strongTower';
   }).length;
-  const net = netIncome(game.cells, prov);
+  const net = aiNet(game, prov);
   const hotFront = enemyUnitAdjacent(game, prov.hexes, prov.owner);
   const freeSlots = buildable.length;
   const units = countOwnedUnits(game, prov.hexes, prov.owner);
@@ -853,7 +858,7 @@ function tryBuildFarm(
   if (houses.length === 0) return false;
 
   const farms = prov.hexes.filter((h) => game.cells[h].building === 'farm').length;
-  const net = netIncome(game.cells, prov);
+  const net = aiNet(game, prov);
   const units = countOwnedUnits(game, prov.hexes, prov.owner);
   const training = prov.hexes.filter((h) => game.cells[h].training).length;
   const idleHouse = houses.some((h) => !game.cells[h].training);
