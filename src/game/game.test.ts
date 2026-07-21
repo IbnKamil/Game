@@ -313,7 +313,7 @@ describe('AI actions', () => {
     expect(afterBuildings >= beforeBuildings || training).toBe(true);
   });
 
-  it('does not fill a tiny starting province with farms before a house', () => {
+  it('opens with farms while reserving one cell for a house', () => {
     const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
     const g = new Game({
       mapRadius: 6,
@@ -324,8 +324,7 @@ describe('AI actions', () => {
     });
     g.currentPlayerId = 1;
     const prov = g.provinces.find((p) => p.owner === 1)!;
-    // Mimic start: 3 hexes, castle + 2 empty, enough for farms but not a house
-    while (prov.hexes.length > 3) {
+    while (prov.hexes.length > 4) {
       const drop = prov.hexes.find((h) => g.cells[h].building !== 'castle')!;
       g.cells[drop].owner = 0;
       prov.hexes = prov.hexes.filter((h) => h !== drop);
@@ -338,20 +337,21 @@ describe('AI actions', () => {
         c.tree = false;
       }
     }
-    prov.money = 20; // farm-affordable, below house1 (25)
+    // Can afford a farm but not a house yet
+    prov.money = 20;
     runAiTurn(g, 1);
     const farms = prov.hexes.filter((h) => g.cells[h].building === 'farm').length;
     const houses = prov.hexes.filter((h) => {
       const b = g.cells[h].building;
       return b === 'house1' || b === 'house2' || b === 'house3' || b === 'house4';
     }).length;
-    expect(farms).toBe(0);
+    expect(farms).toBeGreaterThanOrEqual(1);
     expect(houses).toBe(0);
     const free = prov.hexes.filter((h) => !g.cells[h].building && !g.cells[h].unit).length;
     expect(free).toBeGreaterThanOrEqual(1);
   });
 
-  it('builds a house first when a tiny province can afford it', () => {
+  it('builds a house on the last free cell after farming the rest', () => {
     const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
     const g = new Game({
       mapRadius: 6,
@@ -362,7 +362,7 @@ describe('AI actions', () => {
     });
     g.currentPlayerId = 1;
     const prov = g.provinces.find((p) => p.owner === 1)!;
-    while (prov.hexes.length > 3) {
+    while (prov.hexes.length > 4) {
       const drop = prov.hexes.find((h) => g.cells[h].building !== 'castle')!;
       g.cells[drop].owner = 0;
       prov.hexes = prov.hexes.filter((h) => h !== drop);
@@ -375,6 +375,11 @@ describe('AI actions', () => {
         c.tree = false;
       }
     }
+    // Two free slots already farmed → only one left → house
+    const empties = prov.hexes.filter((h) => !g.cells[h].building);
+    expect(empties.length).toBeGreaterThanOrEqual(2);
+    g.cells[empties[0]!].building = 'farm';
+    if (empties.length > 2) g.cells[empties[1]!].building = 'farm';
     prov.money = 40;
     runAiTurn(g, 1);
     const houses = prov.hexes.filter((h) => {
@@ -382,6 +387,62 @@ describe('AI actions', () => {
       return b === 'house1' || b === 'house2' || b === 'house3' || b === 'house4';
     }).length;
     expect(houses).toBeGreaterThanOrEqual(1);
+  });
+
+  it('spaces towers so they are not adjacent', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    const g = new Game({
+      mapRadius: 7,
+      playerCount: 2,
+      seed: 88,
+      players,
+      aiDifficulty: 'expert',
+    });
+    g.currentPlayerId = 1;
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    for (const h of prov.hexes) {
+      const c = g.cells[h];
+      if (c.building !== 'castle') {
+        c.building = null;
+        c.training = null;
+        c.unit = null;
+        c.tree = false;
+      }
+    }
+    const empties = prov.hexes.filter((h) => !g.cells[h].building);
+    g.cells[empties[0]!].building = 'house1';
+    // Enemy unit on border to trigger defense
+    outer: for (const h of prov.hexes) {
+      for (const n of hexNeighbors(g.cells[h].q, g.cells[h].r)) {
+        const nk = cellKey(n.q, n.r);
+        const nc = g.cells[nk];
+        if (nc && nc.owner !== 1) {
+          nc.owner = 2;
+          nc.unit = { id: 3, owner: 2, rank: 2, moved: false, count: 1 };
+          break outer;
+        }
+      }
+    }
+    for (let i = 0; i < 6; i++) {
+      const live = g.provinces.find((p) => p.owner === 1)!;
+      live.money = 300;
+      runAiTurn(g, 1);
+    }
+    const towerKeys = Object.keys(g.cells).filter((k) => {
+      if (g.cells[k].owner !== 1) return false;
+      const b = g.cells[k].building;
+      return b === 'tower' || b === 'strongTower';
+    });
+    for (const a of towerKeys) {
+      for (const b of towerKeys) {
+        if (a >= b) continue;
+        const ca = g.cells[a];
+        const adj = hexNeighbors(ca.q, ca.r).some(
+          (n) => cellKey(n.q, n.r) === b,
+        );
+        expect(adj).toBe(false);
+      }
+    }
   });
 
   it('prefers interior farms and caps border towers instead of carpeting', () => {
