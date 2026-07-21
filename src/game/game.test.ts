@@ -138,11 +138,11 @@ describe('Map shapes', () => {
     'hex',
     'donut',
     'crescent',
-    'islands',
+    'lakes',
     'corridor',
     'star',
     'hourglass',
-    'twin',
+    'isthmus',
     'fjord',
     'continent',
   ] as const;
@@ -158,6 +158,28 @@ describe('Map shapes', () => {
       mapShape: shape,
       forestDensity: 0,
     });
+  }
+
+  function countComponents(g: Game): number {
+    const seen = new Set<string>();
+    let n = 0;
+    for (const start of Object.keys(g.cells)) {
+      if (seen.has(start)) continue;
+      n += 1;
+      const stack = [start];
+      seen.add(start);
+      while (stack.length) {
+        const key = stack.pop()!;
+        const c = g.cells[key];
+        for (const nb of hexNeighbors(c.q, c.r)) {
+          const nk = cellKey(nb.q, nb.r);
+          if (!g.cells[nk] || seen.has(nk)) continue;
+          seen.add(nk);
+          stack.push(nk);
+        }
+      }
+    }
+    return n;
   }
 
   it('passes map shape from menu into config', () => {
@@ -182,32 +204,11 @@ describe('Map shapes', () => {
     expect(Object.keys(g.cells).length).toBeGreaterThan(30);
   });
 
-  it('twin / islands produce multiple land components', () => {
-    const twin = shapeGame('twin', 22);
-    const islands = shapeGame('islands', 33);
-    const countComponents = (g: Game): number => {
-      const seen = new Set<string>();
-      let n = 0;
-      for (const start of Object.keys(g.cells)) {
-        if (seen.has(start)) continue;
-        n += 1;
-        const stack = [start];
-        seen.add(start);
-        while (stack.length) {
-          const key = stack.pop()!;
-          const c = g.cells[key];
-          for (const nb of hexNeighbors(c.q, c.r)) {
-            const nk = cellKey(nb.q, nb.r);
-            if (!g.cells[nk] || seen.has(nk)) continue;
-            seen.add(nk);
-            stack.push(nk);
-          }
-        }
-      }
-      return n;
-    };
-    expect(countComponents(twin)).toBeGreaterThanOrEqual(2);
-    expect(countComponents(islands)).toBeGreaterThanOrEqual(2);
+  it('every shape is a single connected landmass', () => {
+    for (const shape of shapes) {
+      const g = shapeGame(shape, 200 + shape.length);
+      expect(countComponents(g), shape).toBe(1);
+    }
   });
 
   it('corridor is elongated along one axis', () => {

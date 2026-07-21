@@ -114,26 +114,18 @@ function placeStartingProvinces(
   // Separation scales with land area so odd shapes still space players out
   let minSeparation = Math.max(3, Math.floor(Math.sqrt(land / Math.max(2, players.length)) * 0.85));
   if (shape === 'corridor') minSeparation = Math.max(3, Math.floor(config.mapRadius * 0.45));
-  if (shape === 'islands' || shape === 'twin') {
-    minSeparation = Math.max(4, Math.floor(config.mapRadius * 0.4));
+  if (shape === 'isthmus' || shape === 'hourglass') {
+    minSeparation = Math.max(3, Math.floor(config.mapRadius * 0.35));
   }
 
   const starts: string[] = [];
-  const components = landComponents(cells);
 
   for (let pi = 0; pi < players.length; pi++) {
     const player = players[pi]!;
     let placed = false;
 
-    // Prefer spreading across islands / twin continents
-    const preferredKeys =
-      (shape === 'islands' || shape === 'twin') && components.length > 1
-        ? [...(components[pi % components.length] ?? keys)]
-        : keys;
-
     for (let attempt = 0; attempt < 220 && !placed; attempt++) {
-      const pool = attempt < 160 ? preferredKeys : keys;
-      const key = pool[Math.floor(rng() * pool.length)];
+      const key = keys[Math.floor(rng() * keys.length)];
       if (!key) continue;
       const cell = cells[key];
       if (!cell || cell.owner !== 0) continue;
@@ -191,31 +183,6 @@ function placeStartingProvinces(
       }
     }
   }
-}
-
-function landComponents(cells: Record<string, HexCell>): string[][] {
-  const seen = new Set<string>();
-  const comps: string[][] = [];
-  for (const start of Object.keys(cells)) {
-    if (seen.has(start)) continue;
-    const comp: string[] = [];
-    const stack = [start];
-    seen.add(start);
-    while (stack.length) {
-      const key = stack.pop()!;
-      comp.push(key);
-      const cell = cells[key];
-      for (const n of hexNeighbors(cell.q, cell.r)) {
-        const nk = cellKey(n.q, n.r);
-        if (!cells[nk] || seen.has(nk)) continue;
-        seen.add(nk);
-        stack.push(nk);
-      }
-    }
-    comps.push(comp);
-  }
-  comps.sort((a, b) => b.length - a.length);
-  return comps;
 }
 
 function growBlob(

@@ -1,12 +1,12 @@
 import { cellKey, type Axial, type MapShapeId } from './types';
 import { hexDistance, hexNeighbors } from './hex';
 
-/** Map outline shapes (hex grid masks). */
+/** Map outline shapes (hex grid masks). Always one walkable landmass. */
 export const MAP_SHAPE_PRESETS = [
   {
     id: 'random',
     label: 'Случайная',
-    hint: 'Каждая партия — новая необычная форма',
+    hint: 'Каждая партия — новая необычная связная форма',
   },
   {
     id: 'continent',
@@ -16,7 +16,7 @@ export const MAP_SHAPE_PRESETS = [
   {
     id: 'donut',
     label: 'Кольцо',
-    hint: 'Суша вокруг центрального моря',
+    hint: 'Суша вокруг центрального моря (пройти можно вокруг)',
   },
   {
     id: 'crescent',
@@ -24,9 +24,9 @@ export const MAP_SHAPE_PRESETS = [
     hint: 'Изогнутая дуга суши',
   },
   {
-    id: 'islands',
-    label: 'Архипелаг',
-    hint: 'Несколько островов в океане',
+    id: 'lakes',
+    label: 'Озёра',
+    hint: 'Один материк с внутренними озёрами',
   },
   {
     id: 'corridor',
@@ -44,9 +44,9 @@ export const MAP_SHAPE_PRESETS = [
     hint: 'Два региона, соединённые перешейком',
   },
   {
-    id: 'twin',
-    label: 'Два берега',
-    hint: 'Два материка через пролив',
+    id: 'isthmus',
+    label: 'Перешеек',
+    hint: 'Две части суши, соединённые узким мостом',
   },
   {
     id: 'fjord',
@@ -61,17 +61,17 @@ export const MAP_SHAPE_PRESETS = [
 ] as const satisfies ReadonlyArray<{ id: MapShapeId; label: string; hint: string }>;
 
 /** Concrete shapes (no "random"). */
-export type ConcreteMapShape = Exclude<MapShapeId, 'random'>;
+export type ConcreteMapShape = Exclude<MapShapeId, 'random' | 'islands' | 'twin'>;
 
 const UNUSUAL_SHAPES: ConcreteMapShape[] = [
   'continent',
   'donut',
   'crescent',
-  'islands',
+  'lakes',
   'corridor',
   'star',
   'hourglass',
-  'twin',
+  'isthmus',
   'fjord',
 ];
 
@@ -81,6 +81,9 @@ export function resolveMapShape(shape: MapShapeId | undefined, rng: () => number
     return UNUSUAL_SHAPES[Math.floor(rng() * UNUSUAL_SHAPES.length)]!;
   }
   if (!shape) return 'hex';
+  // Legacy disconnected shapes → connected replacements
+  if (shape === 'islands') return 'lakes';
+  if (shape === 'twin') return 'isthmus';
   return shape;
 }
 
@@ -104,8 +107,8 @@ export function buildLandMask(
     case 'crescent':
       land = maskCrescent(candidates, radius, rng);
       break;
-    case 'islands':
-      land = maskIslands(candidates, radius, seed, rng);
+    case 'lakes':
+      land = maskLakes(candidates, radius, seed, rng);
       break;
     case 'corridor':
       land = maskCorridor(candidates, radius, rng);
@@ -116,8 +119,8 @@ export function buildLandMask(
     case 'hourglass':
       land = maskHourglass(candidates, radius, rng);
       break;
-    case 'twin':
-      land = maskTwin(candidates, radius, rng);
+    case 'isthmus':
+      land = maskIsthmus(candidates, radius, rng);
       break;
     case 'fjord':
       land = maskFjord(candidates, radius, seed, rng);
@@ -128,16 +131,12 @@ export function buildLandMask(
       break;
   }
 
-  // Islands intentionally stay multi-component; others keep largest mass (+ thin bridges already in mask)
-  if (shape !== 'islands' && shape !== 'twin') {
-    land = keepLargestComponent(land);
-  } else if (shape === 'twin') {
-    land = keepTopComponents(land, 2);
-  }
+  // Always one contiguous landmass — units cannot cross water
+  land = keepLargestComponent(land);
 
   // Safety: never return an empty / tiny map
   if (land.size < Math.max(18, Math.floor(radius * 2.5))) {
-    return maskHex(candidates, radius, rng);
+    return keepLargestComponent(maskHex(candidates, radius, rng));
   }
   return land;
 }
@@ -259,54 +258,47 @@ function maskHourglass(candidates: Axial[], radius: number, rng: () => number): 
   return land;
 }
 
-function maskTwin(candidates: Axial[], radius: number, rng: () => number): Set<string> {
-  const lobe = Math.max(3, Math.floor(radius * 0.4));
-  const gap = Math.max(4, Math.floor(radius * 0.62));
+function maskIsthmus(candidates: Axial[], radius: number, rng: () => number): Set<string> {
+  // Two lobes joined by an explicit land bridge (single walkable mass)
+  const lobe = Math.max(3, Math.floor(radius * 0.48));
+  const gap = Math.max(3, Math.floor(radius * 0.42));
   const c1 = { q: -gap, r: Math.floor(gap * 0.1) };
   const c2 = { q: gap, r: -Math.floor(gap * 0.1) };
+  const bridgeW = Math.max(1, Math.floor(radius * 0.14));
   const land = new Set<string>();
   for (const { q, r } of candidates) {
     const d1 = hexDistance({ q, r }, c1);
     const d2 = hexDistance({ q, r }, c2);
-    if (softEdge(d1, lobe, rng, 1.0) || softEdge(d2, lobe, rng, 1.0)) {
-      land.add(cellKey(q, r));
-    }
+    const inLobe = softEdge(d1, lobe, rng, 1.1) || softEdge(d2, lobe, rng, 1.1);
+    const onBridge = Math.abs(r) <= bridgeW && Math.abs(q) <= gap;
+    if (!inLobe && !onBridge) continue;
+    land.add(cellKey(q, r));
   }
   return land;
 }
 
-function maskIslands(
+function maskLakes(
   candidates: Axial[],
   radius: number,
   seed: number,
   rng: () => number,
 ): Set<string> {
-  const islandR = Math.max(2, Math.floor(radius * 0.26));
-  const g = Math.max(islandR + 3, Math.floor(radius * 0.52));
-  const centers: Axial[] = [
-    { q: -g, r: Math.floor(rng() * 2) },
-    { q: g, r: -Math.floor(rng() * 2) },
-  ];
-  if (radius >= 7) {
-    centers.push({ q: Math.floor(rng() * 2) - 0, r: Math.min(g, radius - islandR - 1) });
-  }
-  if (radius >= 10) {
-    centers.push({ q: 0, r: -Math.min(g, radius - islandR - 1) });
-  }
-
-  const land = new Set<string>();
-  for (const { q, r } of candidates) {
-    let best = Infinity;
-    for (const c of centers) {
-      best = Math.min(best, hexDistance({ q, r }, c));
-    }
-    const jitter = hashNoise(q, r, seed) * 0.45;
-    if (best + jitter <= islandR) {
-      land.add(cellKey(q, r));
+  // One continent with inland water holes — land stays contiguous around lakes
+  const land = maskContinent(candidates, radius, seed, rng);
+  const lakes = 2 + Math.floor(rng() * 2); // 2–3
+  const lakeR = Math.max(1, Math.floor(radius * 0.16));
+  for (let i = 0; i < lakes; i++) {
+    const ang = (i / lakes) * Math.PI * 2 + rng() * 0.5;
+    const rad = radius * (0.22 + rng() * 0.28);
+    const cq = Math.round((rad * Math.cos(ang) * 2) / 3);
+    const cr = Math.round(rad * Math.sin(ang) / Math.sqrt(3) - cq / 2);
+    for (const { q, r } of candidates) {
+      if (hexDistance({ q, r }, { q: cq, r: cr }) <= lakeR + hashNoise(q, r, seed + i) * 0.6) {
+        land.delete(cellKey(q, r));
+      }
     }
   }
-  // Guarantee separation: drop any hex that would bridge two islands
-  return keepTopComponents(land, Math.min(centers.length, 4));
+  return land;
 }
 
 function maskContinent(
@@ -372,16 +364,6 @@ function keepLargestComponent(land: Set<string>): Set<string> {
   if (comps.length === 0) return land;
   comps.sort((a, b) => b.size - a.size);
   return comps[0]!;
-}
-
-function keepTopComponents(land: Set<string>, n: number): Set<string> {
-  const comps = connectedComponents(land);
-  comps.sort((a, b) => b.size - a.size);
-  const out = new Set<string>();
-  for (const c of comps.slice(0, n)) {
-    for (const k of c) out.add(k);
-  }
-  return out.size ? out : land;
 }
 
 function connectedComponents(land: Set<string>): Set<string>[] {

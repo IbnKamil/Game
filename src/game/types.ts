@@ -106,19 +106,22 @@ export interface GameConfig {
   mapShape?: MapShapeId;
 }
 
-/** Outline of the generated landmass. */
+/** Outline of the generated landmass (always one connected figure). */
 export type MapShapeId =
   | 'random'
   | 'hex'
   | 'donut'
   | 'crescent'
-  | 'islands'
+  | 'lakes'
   | 'corridor'
   | 'star'
   | 'hourglass'
-  | 'twin'
+  | 'isthmus'
   | 'fjord'
-  | 'continent';
+  | 'continent'
+  /** @deprecated disconnected — remapped to lakes/isthmus */
+  | 'islands'
+  | 'twin';
 
 export type AiDifficulty = 'easy' | 'normal' | 'hard' | 'expert';
 
