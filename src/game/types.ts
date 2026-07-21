@@ -102,7 +102,23 @@ export interface GameConfig {
   forestDensity?: number;
   /** Tree spread speed each full turn (0–100). Default 100. */
   forestSpread?: number;
+  /** Landmass outline. Default: random unusual shape. */
+  mapShape?: MapShapeId;
 }
+
+/** Outline of the generated landmass. */
+export type MapShapeId =
+  | 'random'
+  | 'hex'
+  | 'donut'
+  | 'crescent'
+  | 'islands'
+  | 'corridor'
+  | 'star'
+  | 'hourglass'
+  | 'twin'
+  | 'fjord'
+  | 'continent';
 
 export type AiDifficulty = 'easy' | 'normal' | 'hard' | 'expert';
 

@@ -6,7 +6,11 @@ import {
   defaultPlayerSetup,
 } from './constants';
 import { hexDistance, hexNeighbors } from './hex';
+import { buildLandMask, resolveMapShape, type ConcreteMapShape } from './mapShapes';
 import { hexElevation } from './topo';
+
+export type { ConcreteMapShape } from './mapShapes';
+export { MAP_SHAPE_PRESETS, resolveMapShape } from './mapShapes';
 
 /** Simple seeded PRNG (mulberry32). */
 export function createRng(seed: number): () => number {
@@ -22,33 +26,27 @@ export function createRng(seed: number): () => number {
 export function generateMap(config: GameConfig): {
   cells: Record<string, HexCell>;
   players: Player[];
+  mapShape: ConcreteMapShape;
 } {
   const rng = createRng(config.seed);
-  const cells: Record<string, HexCell> = {};
+  const shape = resolveMapShape(config.mapShape, rng);
   const radius = config.mapRadius;
+  const mask = buildLandMask(shape, radius, config.seed, rng);
 
-  for (let q = -radius; q <= radius; q++) {
-    const r1 = Math.max(-radius, -q - radius);
-    const r2 = Math.min(radius, -q + radius);
-    for (let r = r1; r <= r2; r++) {
-      // Carve irregular coastline
-      const dist = hexDistance({ q, r }, { q: 0, r: 0 });
-      const noise = rng();
-      if (dist > radius - 1.2 && noise > 0.55) continue;
-      if (dist > radius - 0.5 && noise > 0.25) continue;
-
-      cells[cellKey(q, r)] = {
-        q,
-        r,
-        owner: 0,
-        unit: null,
-        building: null,
-        tree: false,
-        palm: false,
-        training: null,
-        elevation: hexElevation(q, r, config.seed),
-      };
-    }
+  const cells: Record<string, HexCell> = {};
+  for (const key of mask) {
+    const [q, r] = key.split(',').map(Number);
+    cells[key] = {
+      q,
+      r,
+      owner: 0,
+      unit: null,
+      building: null,
+      tree: false,
+      palm: false,
+      training: null,
+      elevation: hexElevation(q, r, config.seed),
+    };
   }
 
   scatterTrees(cells, rng, config.forestDensity ?? DEFAULT_FOREST_DENSITY);
@@ -71,9 +69,9 @@ export function generateMap(config: GameConfig): {
     });
   }
 
-  placeStartingProvinces(cells, players, rng, config);
+  placeStartingProvinces(cells, players, rng, config, shape);
 
-  return { cells, players };
+  return { cells, players, mapShape: shape };
 }
 
 /** Place trees so that ~forestDensity% of hexes are forested (mid elevations preferred). */
@@ -109,16 +107,34 @@ function placeStartingProvinces(
   players: Player[],
   rng: () => number,
   config: GameConfig,
+  shape: ConcreteMapShape,
 ): void {
   const keys = Object.keys(cells);
-  const minSeparation = Math.max(3, Math.floor(config.mapRadius * 0.55));
+  const land = keys.length;
+  // Separation scales with land area so odd shapes still space players out
+  let minSeparation = Math.max(3, Math.floor(Math.sqrt(land / Math.max(2, players.length)) * 0.85));
+  if (shape === 'corridor') minSeparation = Math.max(3, Math.floor(config.mapRadius * 0.45));
+  if (shape === 'islands' || shape === 'twin') {
+    minSeparation = Math.max(4, Math.floor(config.mapRadius * 0.4));
+  }
 
   const starts: string[] = [];
+  const components = landComponents(cells);
 
-  for (const player of players) {
+  for (let pi = 0; pi < players.length; pi++) {
+    const player = players[pi]!;
     let placed = false;
-    for (let attempt = 0; attempt < 200 && !placed; attempt++) {
-      const key = keys[Math.floor(rng() * keys.length)];
+
+    // Prefer spreading across islands / twin continents
+    const preferredKeys =
+      (shape === 'islands' || shape === 'twin') && components.length > 1
+        ? [...(components[pi % components.length] ?? keys)]
+        : keys;
+
+    for (let attempt = 0; attempt < 220 && !placed; attempt++) {
+      const pool = attempt < 160 ? preferredKeys : keys;
+      const key = pool[Math.floor(rng() * pool.length)];
+      if (!key) continue;
       const cell = cells[key];
       if (!cell || cell.owner !== 0) continue;
 
@@ -129,7 +145,6 @@ function placeStartingProvinces(
       });
       if (tooClose) continue;
 
-      // Claim a small blob of 3–5 hexes
       const blob = growBlob(cells, q, r, 3 + Math.floor(rng() * 3), rng);
       if (blob.length < 3) continue;
 
@@ -140,7 +155,6 @@ function placeStartingProvinces(
         c.palm = false;
       }
 
-      // Capital near center of blob
       const capital = cells[blob[0]];
       capital.building = 'castle';
       starts.push(blob[0]);
@@ -148,7 +162,25 @@ function placeStartingProvinces(
     }
 
     if (!placed) {
-      // Fallback: any free hex
+      // Relax separation
+      for (let attempt = 0; attempt < 80 && !placed; attempt++) {
+        const key = keys[Math.floor(rng() * keys.length)];
+        const cell = cells[key];
+        if (!cell || cell.owner !== 0) continue;
+        const blob = growBlob(cells, cell.q, cell.r, 3, rng);
+        if (blob.length < 2) continue;
+        for (const bk of blob) {
+          cells[bk].owner = player.id;
+          cells[bk].tree = false;
+          cells[bk].palm = false;
+        }
+        cells[blob[0]].building = 'castle';
+        starts.push(blob[0]);
+        placed = true;
+      }
+    }
+
+    if (!placed) {
       const free = keys.find((k) => cells[k].owner === 0);
       if (free) {
         const c = cells[free];
@@ -159,6 +191,31 @@ function placeStartingProvinces(
       }
     }
   }
+}
+
+function landComponents(cells: Record<string, HexCell>): string[][] {
+  const seen = new Set<string>();
+  const comps: string[][] = [];
+  for (const start of Object.keys(cells)) {
+    if (seen.has(start)) continue;
+    const comp: string[] = [];
+    const stack = [start];
+    seen.add(start);
+    while (stack.length) {
+      const key = stack.pop()!;
+      comp.push(key);
+      const cell = cells[key];
+      for (const n of hexNeighbors(cell.q, cell.r)) {
+        const nk = cellKey(n.q, n.r);
+        if (!cells[nk] || seen.has(nk)) continue;
+        seen.add(nk);
+        stack.push(nk);
+      }
+    }
+    comps.push(comp);
+  }
+  comps.sort((a, b) => b.length - a.length);
+  return comps;
 }
 
 function growBlob(

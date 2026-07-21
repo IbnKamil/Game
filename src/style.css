@@ -540,6 +540,11 @@ button.wide {
   font-weight: 700;
 }
 
+.seg-wrap .seg-btn {
+  flex: 0 1 auto;
+  min-width: 7.2rem;
+}
+
 .menu-section {
   margin: 1.1rem 0 0.55rem;
   font-size: 0.8rem;

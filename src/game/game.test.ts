@@ -133,6 +133,101 @@ describe('Start menu config', () => {
   });
 });
 
+describe('Map shapes', () => {
+  const shapes = [
+    'hex',
+    'donut',
+    'crescent',
+    'islands',
+    'corridor',
+    'star',
+    'hourglass',
+    'twin',
+    'fjord',
+    'continent',
+  ] as const;
+
+  function shapeGame(shape: (typeof shapes)[number], seed = 42): Game {
+    const players = Array.from({ length: 3 }, (_, i) => defaultPlayerSetup(i, i === 0));
+    return new Game({
+      mapRadius: 8,
+      playerCount: 3,
+      seed,
+      players,
+      aiDifficulty: 'normal',
+      mapShape: shape,
+      forestDensity: 0,
+    });
+  }
+
+  it('passes map shape from menu into config', () => {
+    const state = defaultMenuState();
+    expect(state.mapShape).toBe('random');
+    state.mapShape = 'donut';
+    expect(menuToConfig(state).mapShape).toBe('donut');
+  });
+
+  it('generates land for every concrete shape', () => {
+    for (const shape of shapes) {
+      const g = shapeGame(shape, 90 + shape.length);
+      const land = Object.keys(g.cells).length;
+      expect(land, shape).toBeGreaterThan(20);
+      expect(g.players.every((p) => g.provinces.some((pr) => pr.owner === p.id))).toBe(true);
+    }
+  });
+
+  it('donut keeps a hollow center', () => {
+    const g = shapeGame('donut', 11);
+    expect(g.cells['0,0']).toBeUndefined();
+    expect(Object.keys(g.cells).length).toBeGreaterThan(30);
+  });
+
+  it('twin / islands produce multiple land components', () => {
+    const twin = shapeGame('twin', 22);
+    const islands = shapeGame('islands', 33);
+    const countComponents = (g: Game): number => {
+      const seen = new Set<string>();
+      let n = 0;
+      for (const start of Object.keys(g.cells)) {
+        if (seen.has(start)) continue;
+        n += 1;
+        const stack = [start];
+        seen.add(start);
+        while (stack.length) {
+          const key = stack.pop()!;
+          const c = g.cells[key];
+          for (const nb of hexNeighbors(c.q, c.r)) {
+            const nk = cellKey(nb.q, nb.r);
+            if (!g.cells[nk] || seen.has(nk)) continue;
+            seen.add(nk);
+            stack.push(nk);
+          }
+        }
+      }
+      return n;
+    };
+    expect(countComponents(twin)).toBeGreaterThanOrEqual(2);
+    expect(countComponents(islands)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('corridor is elongated along one axis', () => {
+    const g = shapeGame('corridor', 44);
+    let minQ = Infinity;
+    let maxQ = -Infinity;
+    let minR = Infinity;
+    let maxR = -Infinity;
+    for (const c of Object.values(g.cells)) {
+      minQ = Math.min(minQ, c.q);
+      maxQ = Math.max(maxQ, c.q);
+      minR = Math.min(minR, c.r);
+      maxR = Math.max(maxR, c.r);
+    }
+    const spanQ = maxQ - minQ;
+    const spanR = maxR - minR;
+    expect(spanQ).toBeGreaterThan(spanR);
+  });
+});
+
 describe('Forest density', () => {
   it('places roughly the requested share of trees', () => {
     const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, i === 0));
@@ -479,15 +574,35 @@ describe('AI actions', () => {
 
   it('when sealed by enemy towers, banks for house3/4 breakout', () => {
     const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    players[0].aiDifficulty = 'expert';
     const g = new Game({
       mapRadius: 7,
       playerCount: 2,
       seed: 19,
       players,
       aiDifficulty: 'expert',
+      mapShape: 'hex',
     });
     g.currentPlayerId = 1;
     const prov = g.provinces.find((p) => p.owner === 1)!;
+    // Grow province so there is room for HQ after farms/house1
+    const extras: string[] = [];
+    for (const h of [...prov.hexes]) {
+      const c = g.cells[h];
+      for (const n of hexNeighbors(c.q, c.r)) {
+        const nk = cellKey(n.q, n.r);
+        const nc = g.cells[nk];
+        if (!nc || nc.owner !== 0) continue;
+        extras.push(nk);
+      }
+    }
+    for (const nk of extras.slice(0, 6)) {
+      g.cells[nk].owner = 1;
+      g.cells[nk].building = null;
+      g.cells[nk].unit = null;
+      g.cells[nk].tree = false;
+      if (!prov.hexes.includes(nk)) prov.hexes.push(nk);
+    }
     for (const h of prov.hexes) {
       const c = g.cells[h];
       if (c.building !== 'castle') {

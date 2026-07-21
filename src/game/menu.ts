@@ -16,13 +16,15 @@ import {
   type AiDifficultyId,
   type MapSizeId,
 } from './constants';
+import { MAP_SHAPE_PRESETS } from './mapShapes';
 import { drawUnitFigurine, preloadUnitSprites } from './sprites';
-import type { AiDifficulty, GameConfig, PlayerSetup } from './types';
+import type { AiDifficulty, GameConfig, MapShapeId, PlayerSetup } from './types';
 
 export interface MenuState {
   playerCount: number;
   humanCount: number;
   mapSize: MapSizeId;
+  mapShape: MapShapeId;
   /** Target forest coverage 0–100%. */
   forestDensity: number;
   /** Tree spread speed each full turn 0–100%. */
@@ -37,6 +39,7 @@ export function defaultMenuState(): MenuState {
     playerCount,
     humanCount,
     mapSize: 'medium',
+    mapShape: 'random',
     forestDensity: DEFAULT_FOREST_DENSITY,
     forestSpread: DEFAULT_FOREST_SPREAD,
     players: Array.from({ length: playerCount }, (_, i) =>
@@ -87,6 +90,7 @@ export function menuToConfig(state: MenuState): GameConfig {
     aiDifficulty: aiFallback,
     forestDensity: clampForestDensity(state.forestDensity ?? DEFAULT_FOREST_DENSITY),
     forestSpread: clampForestSpread(state.forestSpread ?? DEFAULT_FOREST_SPREAD),
+    mapShape: state.mapShape ?? 'random',
   };
 }
 
@@ -105,6 +109,8 @@ export function mountMenu(
 
   function render(): void {
     syncPlayers(state);
+    const shapeHint =
+      MAP_SHAPE_PRESETS.find((s) => s.id === state.mapShape)?.hint ?? '';
     el.innerHTML = `
       <div class="menu-card">
         <div class="menu-hero">
@@ -133,6 +139,18 @@ export function mountMenu(
                 </button>`,
               ).join('')}
             </div>
+          </label>
+          <label class="field field-wide">
+            <span>Форма карты</span>
+            <div class="seg seg-wrap">
+              ${MAP_SHAPE_PRESETS.map(
+                (s) => `
+                <button type="button" class="seg-btn ${state.mapShape === s.id ? 'active' : ''}" data-shape="${s.id}">
+                  ${s.label}
+                </button>`,
+              ).join('')}
+            </div>
+            <em class="field-hint">${shapeHint}</em>
           </label>
           <label class="field field-wide">
             <span>Лесистость карты</span>
@@ -244,6 +262,13 @@ export function mountMenu(
     el.querySelectorAll<HTMLButtonElement>('[data-map]').forEach((btn) => {
       btn.addEventListener('click', () => {
         state.mapSize = btn.dataset.map as MapSizeId;
+        render();
+      });
+    });
+
+    el.querySelectorAll<HTMLButtonElement>('[data-shape]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.mapShape = btn.dataset.shape as MapShapeId;
         render();
       });
     });
