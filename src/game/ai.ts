@@ -3,6 +3,7 @@ import {
   STRONG_TOWER_COST,
   TOWER_COST,
   UNIT_COST,
+  UNIT_UPKEEP,
   houseRankFromKind,
   isHouseBuilding,
 } from './constants';
@@ -76,12 +77,12 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
     skipMoveChance: 0,
     buildPasses: 5,
     reserveMoney: 0,
-    aggression: 1.25,
-    preferEconomy: 0.35,
+    aggression: 1.15,
+    preferEconomy: 0.75,
     maxMoves: 80,
     alwaysMove: true,
     expandFirst: true,
-    armyDensity: 0.65,
+    armyDensity: 0.55,
   },
 };
 
@@ -314,11 +315,12 @@ function maybeSummon(
           return rb - ra;
         });
 
-  const units = prov.hexes.filter((h) => game.cells[h].unit).length;
+  const units = countOwnedUnits(game, prov.hexes, prov.owner);
   const training = prov.hexes.filter((h) => game.cells[h].training).length;
   const threatened = isThreatened(game, prov.hexes, prov.owner);
   const net = netIncome(game.cells, prov);
   const armyCap = Math.max(1, Math.ceil(prov.hexes.length * profile.armyDensity));
+  const enemyMax = maxEnemyUnitRank(game, prov.owner);
 
   for (const key of ordered) {
     const cell = game.cells[key];
@@ -328,24 +330,31 @@ function maybeSummon(
     if (!live) continue;
 
     const cost = UNIT_COST[rank];
-    const reserve =
-      units + training === 0 ? 0 : profile.reserveMoney;
+    const reserve = units + training === 0 ? 0 : profile.reserveMoney;
     if (live.money < cost + reserve) continue;
 
-    if (difficulty === 'easy' && rank >= 3 && net < 6) continue;
-    // Expert: avoid starving income with too many high-rank upkeeps unless rich
-    if (difficulty === 'expert' && rank >= 3 && net < rank * 3 && units + training >= 2) {
+    // Easy: skip expensive ranks when poor
+    if (difficulty === 'easy' && rank >= 3 && net < 4) continue;
+
+    // Match enemy tech: allow high-rank recruit even with modest net
+    const needCounter = enemyMax >= rank;
+    if (
+      !needCounter &&
+      rank >= 3 &&
+      net < UNIT_UPKEEP[rank] &&
+      units + training >= armyCap
+    ) {
       continue;
     }
 
     const forceRecruit =
-      difficulty === 'expert' &&
-      (units + training === 0 || threatened || live.money >= cost * 2);
+      units + training === 0 ||
+      threatened ||
+      needCounter ||
+      live.money >= cost * 2.5;
 
     const want =
       forceRecruit ||
-      units + training === 0 ||
-      threatened ||
       units + training < armyCap ||
       live.money > cost + 16 + profile.reserveMoney;
 
@@ -354,6 +363,28 @@ function maybeSummon(
 
     game.summonAt(key);
   }
+}
+
+function countOwnedUnits(game: Game, hexes: string[], owner: PlayerId): number {
+  let n = 0;
+  for (const h of hexes) {
+    const u = game.cells[h].unit;
+    if (u && u.owner === owner) n += 1;
+  }
+  return n;
+}
+
+/** Highest enemy unit rank visible on the map (0 if none). */
+function maxEnemyUnitRank(game: Game, owner: PlayerId): number {
+  let max = 0;
+  for (const key in game.cells) {
+    const cell = game.cells[key];
+    const u = cell.unit;
+    if (!u || u.owner === owner || u.owner === 0) continue;
+    if (game.isAlly(owner, u.owner)) continue;
+    if (u.rank > max) max = u.rank;
+  }
+  return max;
 }
 
 function isThreatened(game: Game, hexes: string[], owner: PlayerId): boolean {
@@ -388,6 +419,29 @@ function enemyUnitAdjacent(game: Game, hexes: string[], owner: PlayerId): boolea
   return false;
 }
 
+function isBorderHex(game: Game, key: string, owner: PlayerId): boolean {
+  const c = game.cells[key];
+  if (!c || c.owner !== owner) return false;
+  return hexNeighbors(c.q, c.r).some((n) => {
+    const nc = game.cells[cellKey(n.q, n.r)];
+    return !nc || nc.owner !== owner;
+  });
+}
+
+function isHotBorderHex(game: Game, key: string, owner: PlayerId): boolean {
+  const c = game.cells[key];
+  if (!c || c.owner !== owner) return false;
+  return hexNeighbors(c.q, c.r).some((n) => {
+    const nc = game.cells[cellKey(n.q, n.r)];
+    return (
+      !!nc &&
+      nc.owner !== 0 &&
+      nc.owner !== owner &&
+      !game.isAlly(owner, nc.owner)
+    );
+  });
+}
+
 function pickBuildHex(
   game: Game,
   candidates: string[],
@@ -398,10 +452,7 @@ function pickBuildHex(
   const inner: string[] = [];
   for (const h of candidates) {
     const c = game.cells[h];
-    const onEdge = hexNeighbors(c.q, c.r).some((n) => {
-      const nc = game.cells[cellKey(n.q, n.r)];
-      return !nc || nc.owner !== c.owner;
-    });
+    const onEdge = isBorderHex(game, h, c.owner);
     (onEdge ? border : inner).push(h);
   }
   const pool = preferBorder
@@ -432,84 +483,170 @@ function maybeBuild(
 
   const houses = prov.hexes.filter((h) => isHouseBuilding(game.cells[h].building));
   const farms = prov.hexes.filter((h) => game.cells[h].building === 'farm').length;
+  const towers = prov.hexes.filter((h) => {
+    const b = game.cells[h].building;
+    return b === 'tower' || b === 'strongTower';
+  }).length;
   const net = netIncome(game.cells, prov);
-  const threatened = isThreatened(game, prov.hexes, prov.owner);
   const hotFront = enemyUnitAdjacent(game, prov.hexes, prov.owner);
   const freeSlots = buildable.length;
-  const units = prov.hexes.filter((h) => game.cells[h].unit).length;
+  const units = countOwnedUnits(game, prov.hexes, prov.owner);
   const training = prov.hexes.filter((h) => game.cells[h].training).length;
+  const underArmed =
+    units + training < Math.max(1, Math.ceil(prov.hexes.length * profile.armyDensity));
+  const enemyMax = maxEnemyUnitRank(game, prov.owner);
+  const borderSlots = buildable.filter((h) => isBorderHex(game, h, prov.owner));
+  const hotBorderSlots = buildable.filter((h) => isHotBorderHex(game, h, prov.owner));
+  const interiorSlots = buildable.filter((h) => !isBorderHex(game, h, prov.owner));
+  const borderHexes = prov.hexes.filter((h) => isBorderHex(game, h, prov.owner)).length;
+  // Cap defense: roughly one tower per 3 border hexes (min 1 if hot front)
+  const towerCap = Math.max(hotFront ? 1 : 0, Math.ceil(borderHexes / 3));
 
   // --- No recruitment house yet ---
   if (houses.length === 0) {
     const houseNeed = HOUSE_COST[1] + Math.floor(profile.reserveMoney * 0.1);
     if (prov.money >= houseNeed) {
-      place(game, pickBuildHex(game, buildable, false), 'buildHouse1');
-      return;
+      if (place(game, pickBuildHex(game, buildable, false), 'buildHouse1')) return;
     }
     const scarceLand = freeSlots <= 2 || prov.hexes.length <= 4;
     if (scarceLand || profile.expandFirst) return;
     if (freeSlots > 1 && net < 5) {
       const cost = farmCost(game.cells, prov);
-      if (prov.money >= cost) place(game, pickBuildHex(game, buildable, false), 'buildFarm');
+      if (prov.money >= cost) {
+        place(
+          game,
+          pickBuildHex(game, interiorSlots.length ? interiorSlots : buildable, false),
+          'buildFarm',
+        );
+      }
     }
     return;
   }
 
-  // Early expert/hard: keep cash for militia instead of farms while under-armed
-  const underArmed = units + training < Math.max(1, Math.ceil(prov.hexes.length * profile.armyDensity));
-  if (profile.expandFirst && underArmed && pass < profile.buildPasses - 1) {
-    // Still allow house upgrades / defense below
-  } else if (!profile.expandFirst) {
-    // fall through
-  }
-
-  // Upgrade houses
+  // --- Tech up houses to counter enemy ranks (priority over towers) ---
   for (const rank of [4, 3, 2] as HouseRank[]) {
     const has = houses.some((h) => houseRankFromKind(game.cells[h].building!) === rank);
+    if (has) continue;
+
     const needFarms = Math.max(0, rank - 2);
+    const cost = HOUSE_COST[rank];
+    if (prov.money < cost + profile.reserveMoney) continue;
+
+    const counterEnemy = enemyMax >= rank - 1 || (rank >= 3 && enemyMax >= 2);
+    const economyOk = farms >= needFarms || net >= rank * 2 || prov.money >= cost * 1.5;
+    // Don't wait forever for "full army" before building HQ / factory
+    const armyGateOk =
+      rank === 2 ||
+      !underArmed ||
+      counterEnemy ||
+      net >= rank * 3 ||
+      prov.money >= cost + UNIT_COST[rank] + 20;
+
+    if (!economyOk || !armyGateOk) continue;
+    // Soft farm gate: prefer some economy for rank 3+, but allow if countering
+    if (rank >= 3 && farms < needFarms && !counterEnemy && net < rank * 2) continue;
+
     if (
-      !has &&
-      farms >= needFarms &&
-      net >= rank * 2 &&
-      prov.money >= HOUSE_COST[rank] + profile.reserveMoney &&
-      (!profile.expandFirst || !underArmed || rank === 2)
+      place(
+        game,
+        pickBuildHex(game, interiorSlots.length ? interiorSlots : buildable, false),
+        `buildHouse${rank}` as SelectionMode,
+      )
     ) {
-      place(game, pickBuildHex(game, buildable, false), `buildHouse${rank}` as SelectionMode);
       return;
     }
   }
 
-  // Extra house when large
+  // Extra low-rank house when large / need more recruitment
   if (
     houses.length < Math.min(3, 1 + Math.floor(prov.hexes.length / 5)) &&
     freeSlots > 1 &&
     prov.money >= HOUSE_COST[1] + 12 + profile.reserveMoney &&
     net >= 5 &&
-    !underArmed
+    (!underArmed || enemyMax >= 2)
   ) {
-    place(game, pickBuildHex(game, buildable, false), 'buildHouse1');
-    return;
+    if (
+      place(
+        game,
+        pickBuildHex(game, interiorSlots.length ? interiorSlots : buildable, false),
+        'buildHouse1',
+      )
+    ) {
+      return;
+    }
   }
 
-  // Defense — expert builds when enemy units are adjacent
-  const wantTower =
-    (hotFront && profile.aggression >= 1) ||
-    (threatened && Math.random() < 0.35 + profile.aggression * 0.4);
-  if (wantTower && prov.money >= TOWER_COST + profile.reserveMoney * 0.2) {
-    const mode: SelectionMode =
-      prov.money >= STRONG_TOWER_COST + profile.reserveMoney && (hotFront || profile.aggression > 1)
-        ? 'buildStrongTower'
-        : 'buildTower';
-    place(game, pickBuildHex(game, buildable, true), mode);
-    return;
+  // --- Defense: ONLY on border, capped — never carpet the province ---
+  if (towers < towerCap && (hotBorderSlots.length > 0 || (hotFront && borderSlots.length > 0))) {
+    const pool = hotBorderSlots.length ? hotBorderSlots : borderSlots;
+    const canStrong =
+      prov.money >= STRONG_TOWER_COST + profile.reserveMoney &&
+      (hotFront || profile.aggression >= 1);
+    const canTower = prov.money >= TOWER_COST + Math.floor(profile.reserveMoney * 0.2);
+    if (canStrong || canTower) {
+      // Prefer strong lines when enemy units press the border
+      const mode: SelectionMode =
+        canStrong && (hotFront || towers === 0) ? 'buildStrongTower' : 'buildTower';
+      if (mode === 'buildStrongTower' || canTower) {
+        if (place(game, pickBuildHex(game, pool, true), mode)) return;
+      }
+    }
   }
 
-  // Farms: delayed for expand-first AIs (handled in maybeBuildFarmOnly after summon)
-  if (!profile.expandFirst) {
-    maybeBuildFarmOnly(game, provinceId, profile);
+  // --- Interior farms (economy) — before more defense spam ---
+  if (!profile.expandFirst || pass >= profile.buildPasses - 2 || !underArmed || net < 4) {
+    if (tryBuildFarm(game, provinceId, profile, interiorSlots, buildable)) return;
   } else if (difficulty !== 'expert' && pass === profile.buildPasses - 1) {
-    maybeBuildFarmOnly(game, provinceId, profile);
+    if (tryBuildFarm(game, provinceId, profile, interiorSlots, buildable)) return;
   }
+}
+
+function tryBuildFarm(
+  game: Game,
+  provinceId: number,
+  profile: AiProfile,
+  interiorSlots: string[],
+  buildable: string[],
+): boolean {
+  const prov = game.provinces.find((p) => p.id === provinceId);
+  if (!prov || prov.owner !== game.currentPlayerId) return false;
+
+  const houses = prov.hexes.filter((h) => isHouseBuilding(game.cells[h].building));
+  if (houses.length === 0) return false;
+
+  const farms = prov.hexes.filter((h) => game.cells[h].building === 'farm').length;
+  const net = netIncome(game.cells, prov);
+  const units = countOwnedUnits(game, prov.hexes, prov.owner);
+  const idleHouse = houses.some((h) => !game.cells[h].training);
+  const pool = interiorSlots.length ? interiorSlots : buildable;
+  if (pool.length === 0) return false;
+
+  // Keep a little cash for first recruit, but don't block farms forever
+  if (profile.expandFirst && idleHouse && units === 0 && prov.money < UNIT_COST[1] + 20) {
+    if (prov.money >= UNIT_COST[1]) return false;
+  }
+
+  const interiorHexes = prov.hexes.filter((h) => !isBorderHex(game, h, prov.owner)).length;
+  const farmTarget = Math.max(
+    profile.expandFirst ? 1 : 2,
+    Math.floor(interiorHexes * 0.55),
+    Math.floor(prov.hexes.length / 3),
+  );
+  const wantFarm = farms < farmTarget || net < 4 + profile.preferEconomy * 4;
+  if (!wantFarm) return false;
+  // Leave border slots free for defense when possible — but still farm if no interior
+  if (
+    interiorSlots.length === 0 &&
+    farms >= Math.max(1, Math.ceil(farmTarget * 0.5)) &&
+    net >= 3
+  ) {
+    return false;
+  }
+
+  const cost = farmCost(game.cells, prov);
+  if (prov.money < cost + Math.floor(profile.reserveMoney * 0.2)) return false;
+
+  return place(game, pickBuildHex(game, pool, false), 'buildFarm');
 }
 
 function maybeBuildFarmOnly(game: Game, provinceId: number, profile: AiProfile): void {
@@ -522,38 +659,10 @@ function maybeBuildFarmOnly(game: Game, provinceId: number, profile: AiProfile):
   });
   if (buildable.length === 0) return;
 
-  const houses = prov.hexes.filter((h) => isHouseBuilding(game.cells[h].building));
-  if (houses.length === 0) return;
-
-  const farms = prov.hexes.filter((h) => game.cells[h].building === 'farm').length;
-  const net = netIncome(game.cells, prov);
-  const freeSlots = buildable.length;
-  const units = prov.hexes.filter((h) => game.cells[h].unit).length;
-  const idleHouse = houses.some((h) => !game.cells[h].training);
-
-  // Keep recruiting if under-armed
-  if (profile.expandFirst && idleHouse && units === 0 && prov.money >= UNIT_COST[1]) return;
-  if (
-    profile.expandFirst &&
-    idleHouse &&
-    units < Math.ceil(prov.hexes.length * profile.armyDensity) &&
-    prov.money >= UNIT_COST[1] + farmCost(game.cells, prov)
-  ) {
-    return;
-  }
-
-  const farmTarget = profile.expandFirst
-    ? Math.max(0, Math.floor(prov.hexes.length / 4))
-    : Math.max(1, Math.floor(prov.hexes.length / 3));
-  const wantFarm = farms < farmTarget || net < 3 + profile.preferEconomy * 3;
-  if (!wantFarm || (freeSlots <= 1 && net >= 2)) return;
-
-  const cost = farmCost(game.cells, prov);
-  if (prov.money >= cost + Math.floor(profile.reserveMoney * 0.2)) {
-    place(game, pickBuildHex(game, buildable, false), 'buildFarm');
-  }
+  const interiorSlots = buildable.filter((h) => !isBorderHex(game, h, prov.owner));
+  tryBuildFarm(game, provinceId, profile, interiorSlots, buildable);
 }
 
-function place(game: Game, hexKey: string, mode: SelectionMode): void {
-  game.buildAt(hexKey, mode);
+function place(game: Game, hexKey: string, mode: SelectionMode): boolean {
+  return game.buildAt(hexKey, mode);
 }

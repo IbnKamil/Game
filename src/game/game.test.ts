@@ -383,6 +383,161 @@ describe('AI actions', () => {
     }).length;
     expect(houses).toBeGreaterThanOrEqual(1);
   });
+
+  it('prefers interior farms and caps border towers instead of carpeting', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    const g = new Game({
+      mapRadius: 8,
+      playerCount: 2,
+      seed: 55,
+      players,
+      aiDifficulty: 'expert',
+    });
+    g.currentPlayerId = 1;
+    let prov = g.provinces.find((p) => p.owner === 1)!;
+    for (const h of prov.hexes) {
+      const c = g.cells[h];
+      if (c.building !== 'castle') {
+        c.building = null;
+        c.training = null;
+        c.unit = null;
+        c.tree = false;
+      }
+    }
+    // Grow a blob so the province has real interior hexes
+    const queue = [...prov.hexes];
+    while (prov.hexes.length < 12 && queue.length) {
+      const cur = queue.shift()!;
+      const c = g.cells[cur];
+      for (const n of hexNeighbors(c.q, c.r)) {
+        const nk = cellKey(n.q, n.r);
+        const nc = g.cells[nk];
+        if (!nc || nc.owner === 1) continue;
+        nc.owner = 1;
+        nc.building = null;
+        nc.unit = null;
+        nc.tree = false;
+        nc.training = null;
+        prov.hexes.push(nk);
+        queue.push(nk);
+        if (prov.hexes.length >= 12) break;
+      }
+    }
+    const houseSlot = prov.hexes.find((h) => !g.cells[h].building)!;
+    g.cells[houseSlot].building = 'house1';
+
+    outer: for (const h of prov.hexes) {
+      const c = g.cells[h];
+      for (const n of hexNeighbors(c.q, c.r)) {
+        const nk = cellKey(n.q, n.r);
+        const nc = g.cells[nk];
+        if (nc && nc.owner !== 1) {
+          nc.owner = 2;
+          nc.unit = { id: 99, owner: 2, rank: 2, moved: false, count: 1 };
+          nc.building = null;
+          break outer;
+        }
+      }
+    }
+
+    for (let i = 0; i < 10; i++) {
+      prov = g.provinces.find((p) => p.owner === 1)!;
+      // Keep hex list in sync if rebuild happened
+      if (prov.hexes.length < 8) {
+        for (const key of Object.keys(g.cells)) {
+          if (g.cells[key].owner === 1 && !prov.hexes.includes(key)) prov.hexes.push(key);
+        }
+      }
+      prov.money = 400;
+      runAiTurn(g, 1);
+    }
+
+    prov = g.provinces.find((p) => p.owner === 1)!;
+    const owned = Object.keys(g.cells).filter((k) => g.cells[k].owner === 1);
+    const farms = owned.filter((h) => g.cells[h].building === 'farm').length;
+    const towers = owned.filter((h) => {
+      const b = g.cells[h].building;
+      return b === 'tower' || b === 'strongTower';
+    }).length;
+    const interiorTowers = owned.filter((h) => {
+      const c = g.cells[h];
+      const b = c.building;
+      if (b !== 'tower' && b !== 'strongTower') return false;
+      const border = hexNeighbors(c.q, c.r).some((n) => {
+        const nc = g.cells[cellKey(n.q, n.r)];
+        return !nc || nc.owner !== 1;
+      });
+      return !border;
+    }).length;
+
+    expect(farms).toBeGreaterThan(0);
+    expect(interiorTowers).toBe(0);
+    const borderCount = owned.filter((h) => {
+      const c = g.cells[h];
+      return hexNeighbors(c.q, c.r).some((n) => {
+        const nc = g.cells[cellKey(n.q, n.r)];
+        return !nc || nc.owner !== 1;
+      });
+    }).length;
+    expect(towers).toBeLessThanOrEqual(Math.max(2, Math.ceil(borderCount / 3) + 1));
+  });
+
+  it('builds house3/4 when enemy fields high-rank units and AI can afford it', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    const g = new Game({
+      mapRadius: 8,
+      playerCount: 2,
+      seed: 21,
+      players,
+      aiDifficulty: 'hard',
+    });
+    g.currentPlayerId = 1;
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    // Expand province for free build slots
+    const queue = [...prov.hexes];
+    while (prov.hexes.length < 10 && queue.length) {
+      const cur = queue.shift()!;
+      const c = g.cells[cur];
+      for (const n of hexNeighbors(c.q, c.r)) {
+        const nk = cellKey(n.q, n.r);
+        const nc = g.cells[nk];
+        if (!nc || nc.owner === 1) continue;
+        nc.owner = 1;
+        nc.building = null;
+        nc.unit = null;
+        nc.tree = false;
+        nc.training = null;
+        prov.hexes.push(nk);
+        queue.push(nk);
+        if (prov.hexes.length >= 10) break;
+      }
+    }
+    for (const h of prov.hexes) {
+      const c = g.cells[h];
+      if (c.building !== 'castle') {
+        c.building = null;
+        c.training = null;
+        c.unit = null;
+        c.tree = false;
+      }
+    }
+    const empties = prov.hexes.filter((h) => !g.cells[h].building);
+    expect(empties.length).toBeGreaterThanOrEqual(4);
+    g.cells[empties[0]!].building = 'house1';
+    g.cells[empties[1]!].building = 'farm';
+    g.cells[empties[2]!].building = 'farm';
+    prov.money = 220;
+    const enemyHex = Object.keys(g.cells).find((k) => g.cells[k].owner === 2)!;
+    g.cells[enemyHex].unit = { id: 7, owner: 2, rank: 4, moved: false, count: 1 };
+
+    runAiTurn(g, 1);
+    const owned = Object.keys(g.cells).filter((k) => g.cells[k].owner === 1);
+    const high = owned.some((h) => {
+      const b = g.cells[h].building;
+      return b === 'house3' || b === 'house4';
+    });
+    expect(high).toBe(true);
+  });
 });
 
 describe('Movement rules', () => {
