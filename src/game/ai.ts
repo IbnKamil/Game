@@ -11,6 +11,7 @@ import {
 import { farmCost, netIncome, provincesOfPlayer } from './economy';
 import type { Game } from './Game';
 import { hexNeighbors } from './hex';
+import { runStrategicAiTurn } from './aiStrategic';
 import {
   cellKey,
   type AiDifficulty,
@@ -111,12 +112,19 @@ const PROFILES: Record<AiDifficulty, AiProfile> = {
   },
 };
 
-/** Heuristic AI — batched province rebuilds to avoid UI freezes. */
+/** Heuristic AI — batched province rebuilds to avoid UI freezes.
+ *  Expert uses the strategic planner in aiStrategic.ts instead.
+ */
 export function runAiTurn(game: Game, playerId: PlayerId): void {
   if (game.winnerId || game.currentPlayerId !== playerId) return;
   if (game.currentPlayer().isHuman) return;
 
   const difficulty = game.aiDifficultyFor(playerId) ?? 'normal';
+  if (difficulty === 'expert') {
+    runStrategicAiTurn(game, playerId);
+    return;
+  }
+
   const profile = PROFILES[difficulty] ?? PROFILES.normal;
   const provinces = provincesOfPlayer(game.provinces, playerId);
   if (provinces.length === 0) return;
@@ -144,15 +152,14 @@ export function runAiTurn(game: Game, playerId: PlayerId): void {
 
     moveAllUnits(game, playerId, profile, difficulty);
 
-    // Second wave: spend leftover cash and push again
-    if (difficulty === 'expert' || difficulty === 'hard') {
+    // Second wave for hard
+    if (difficulty === 'hard') {
       for (const prov of provincesOfPlayer(game.provinces, playerId)) {
         maybeSummon(game, prov.id, profile, difficulty);
       }
       moveAllUnits(game, playerId, profile, difficulty);
     }
 
-    // Bankroll ally with whatever is left after the war economy
     if (profile.aidAllies) {
       maybeAidAllies(game, playerId, difficulty);
     }

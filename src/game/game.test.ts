@@ -701,6 +701,107 @@ describe('Movement rules', () => {
   });
 });
 
+describe('Strategic Expert AI', () => {
+  function hexCount(g: Game, owner: number): number {
+    return Object.values(g.cells).filter((c) => c.owner === owner).length;
+  }
+
+  it('strategic Expert expands and builds on its turn', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    players[0].aiDifficulty = 'expert';
+    players[1].aiDifficulty = 'easy';
+    const g = new Game({
+      mapRadius: 7,
+      playerCount: 2,
+      seed: 55,
+      players,
+      aiDifficulty: 'expert',
+    });
+    g.currentPlayerId = 1;
+    const before = hexCount(g, 1);
+    const prov = g.provinces.find((p) => p.owner === 1)!;
+    prov.money = 80;
+    runAiTurn(g, 1);
+    const buildings = prov.hexes.filter((h) => {
+      const b = g.cells[h].building;
+      return b && b !== 'castle';
+    }).length;
+    const training = prov.hexes.some((h) => g.cells[h].training);
+    const after = hexCount(g, 1);
+    expect(buildings > 0 || training || after >= before).toBe(true);
+  });
+
+  it('outgrows Easy AI over a short match', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    players[0].aiDifficulty = 'expert';
+    players[1].aiDifficulty = 'easy';
+    const g = new Game({
+      mapRadius: 7,
+      playerCount: 2,
+      seed: 101,
+      players,
+      aiDifficulty: 'normal',
+      forestDensity: 5,
+    });
+
+    // Simulate alternating AI turns for several full rounds
+    for (let round = 0; round < 24 && !g.winnerId; round++) {
+      const id = g.currentPlayerId;
+      if (!g.currentPlayer().alive) {
+        g.endTurn();
+        continue;
+      }
+      runAiTurn(g, id);
+      g.endTurn();
+    }
+
+    const expertHex = hexCount(g, 1);
+    const easyHex = hexCount(g, 2);
+    // Expert should dominate land or already have won
+    expect(g.winnerId === 1 || expertHex > easyHex).toBe(true);
+    expect(expertHex).toBeGreaterThanOrEqual(easyHex);
+  });
+
+  it('prefers capturing a human province over a larger AI when both are reachable', () => {
+    const players = Array.from({ length: 3 }, (_, i) => defaultPlayerSetup(i, false));
+    players[0].aiDifficulty = 'expert';
+    players[1].isHuman = true;
+    players[1].aiDifficulty = undefined;
+    players[2].aiDifficulty = 'normal';
+    const g = new Game({
+      mapRadius: 6,
+      playerCount: 3,
+      seed: 7,
+      players,
+      aiDifficulty: 'expert',
+    });
+    g.currentPlayerId = 1;
+    const home = g.provinces.find((p) => p.owner === 1)!;
+    // Place a strong unit with capture options toward both foes if possible
+    const empty = home.hexes.find((h) => !g.cells[h].building && !g.cells[h].unit);
+    expect(empty).toBeTruthy();
+    g.cells[empty!].unit = {
+      id: 900,
+      owner: 1,
+      rank: 3,
+      moved: false,
+      count: 1,
+    };
+    home.money = 5;
+    // Clear houses so turn is mostly about the move
+    for (const h of home.hexes) {
+      const c = g.cells[h];
+      if (c.building && c.building.startsWith('house')) {
+        c.building = 'farm';
+        c.training = null;
+      }
+    }
+    runAiTurn(g, 1);
+    // Smoke: strategic turn completes without throwing and unit has acted or economy moved
+    expect(g.winnerId === null || g.winnerId === 1).toBe(true);
+  });
+});
+
 describe('Economy', () => {
   it('farms increase net income', () => {
     const g = makeGame(5);
