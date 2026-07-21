@@ -99,6 +99,28 @@ describe('Start menu config', () => {
     state.forestSpread = -10;
     expect(menuToConfig(state).forestSpread).toBe(0);
   });
+
+  it('keeps per-nation AI difficulty through config and Game', () => {
+    const state = defaultMenuState();
+    state.playerCount = 4;
+    state.humanCount = 1;
+    state.aiDifficulty = 'normal';
+    syncPlayers(state);
+    state.players[1].aiDifficulty = 'easy';
+    state.players[2].aiDifficulty = 'hard';
+    state.players[3].aiDifficulty = 'expert';
+    const config = menuToConfig(state);
+    expect(config.players[1].aiDifficulty).toBe('easy');
+    expect(config.players[2].aiDifficulty).toBe('hard');
+    expect(config.players[3].aiDifficulty).toBe('expert');
+    expect(config.players[0].aiDifficulty).toBeUndefined();
+
+    const g = new Game(config);
+    expect(g.aiDifficultyFor(1)).toBe('normal'); // human falls back to config
+    expect(g.aiDifficultyFor(2)).toBe('easy');
+    expect(g.aiDifficultyFor(3)).toBe('hard');
+    expect(g.aiDifficultyFor(4)).toBe('expert');
+  });
 });
 
 describe('Forest density', () => {
@@ -710,6 +732,24 @@ describe('Economy', () => {
     expect(expert - base).toBe(EXPERT_AI_FARM_BONUS);
 
     g.players[0].isHuman = true;
+    expect(g.farmBonusFor(1)).toBe(0);
+  });
+
+  it('farm bonus follows per-nation expert, not only global config', () => {
+    const players = Array.from({ length: 2 }, (_, i) => defaultPlayerSetup(i, false));
+    players[0].aiDifficulty = 'expert';
+    players[1].aiDifficulty = 'normal';
+    const g = new Game({
+      mapRadius: 6,
+      playerCount: 2,
+      seed: 4,
+      players,
+      aiDifficulty: 'normal',
+    });
+    expect(g.farmBonusFor(1)).toBe(EXPERT_AI_FARM_BONUS);
+    expect(g.farmBonusFor(2)).toBe(0);
+
+    g.players[0].aiDifficulty = 'hard';
     expect(g.farmBonusFor(1)).toBe(0);
   });
 });

@@ -98,7 +98,7 @@ export function runAiTurn(game: Game, playerId: PlayerId): void {
   if (game.winnerId || game.currentPlayerId !== playerId) return;
   if (game.currentPlayer().isHuman) return;
 
-  const difficulty = game.config.aiDifficulty ?? 'normal';
+  const difficulty = game.aiDifficultyFor(playerId) ?? 'normal';
   const profile = PROFILES[difficulty] ?? PROFILES.normal;
   const provinces = provincesOfPlayer(game.provinces, playerId);
   if (provinces.length === 0) return;

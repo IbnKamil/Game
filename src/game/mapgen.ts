@@ -65,6 +65,9 @@ export function generateMap(config: GameConfig): {
       isHuman: setup.isHuman,
       alive: true,
       teamId: setup.teamId || i,
+      ...(setup.isHuman
+        ? {}
+        : { aiDifficulty: setup.aiDifficulty ?? config.aiDifficulty }),
     });
   }
 

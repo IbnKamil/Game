@@ -185,6 +185,7 @@ export function defaultPlayerSetup(index: number, isHuman: boolean): {
   color: string;
   isHuman: boolean;
   teamId: number;
+  aiDifficulty?: AiDifficultyId;
 } {
   return {
     name: DEFAULT_NATION_NAMES[index % DEFAULT_NATION_NAMES.length],

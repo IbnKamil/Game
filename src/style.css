@@ -620,6 +620,24 @@ button.wide {
   min-width: 3.2rem;
 }
 
+.nation-ai-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.nation-ai-diff select {
+  font-family: var(--font);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 0.3rem 0.4rem;
+  min-width: 6.5rem;
+}
+
 .menu-legend {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -752,7 +770,8 @@ button.wide {
     text-align: left;
   }
 
-  .nation-team {
+  .nation-team,
+  .nation-ai-diff {
     grid-column: 2 / -1;
   }
 }

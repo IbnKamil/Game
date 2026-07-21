@@ -32,6 +32,7 @@ import { createRng, generateMap } from './mapgen';
 import { alliesOf, isAlly, isEnemy } from './teams';
 import {
   cellKey,
+  type AiDifficulty,
   type BuildingKind,
   type GameConfig,
   type GameSnapshot,
@@ -617,11 +618,18 @@ export class Game {
     this.beginPlayerTurn(this.currentPlayerId);
   }
 
+  /** Effective AI difficulty for a player (per-nation, else global config). */
+  aiDifficultyFor(ownerId: PlayerId): AiDifficulty {
+    const p = this.players.find((x) => x.id === ownerId);
+    if (!p || p.isHuman) return this.config.aiDifficulty;
+    return p.aiDifficulty ?? this.config.aiDifficulty;
+  }
+
   /** Extra farm income for Expert AI provinces. */
   farmBonusFor(ownerId: PlayerId): number {
     const p = this.players.find((x) => x.id === ownerId);
     if (!p || p.isHuman) return 0;
-    return this.config.aiDifficulty === 'expert' ? EXPERT_AI_FARM_BONUS : 0;
+    return this.aiDifficultyFor(ownerId) === 'expert' ? EXPERT_AI_FARM_BONUS : 0;
   }
 
   beginPlayerTurn(playerId: PlayerId): void {

@@ -63,6 +63,8 @@ export interface Player {
   alive: boolean;
   /** Allies share the same teamId (1..N). */
   teamId: number;
+  /** Per-nation AI difficulty; falls back to GameConfig.aiDifficulty. */
+  aiDifficulty?: AiDifficulty;
 }
 
 /** Setup entry from the start menu. */
@@ -72,6 +74,8 @@ export interface PlayerSetup {
   isHuman: boolean;
   /** Allies share the same teamId (1..N). Default: solo team per player. */
   teamId: number;
+  /** Per-nation AI difficulty (AI only). */
+  aiDifficulty?: AiDifficulty;
 }
 
 export type SelectionMode =

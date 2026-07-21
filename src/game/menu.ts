@@ -67,6 +67,11 @@ export function syncPlayers(state: MenuState): void {
     // Clamp team id to available player slots
     if (next[i].teamId < 1) next[i].teamId = 1;
     if (next[i].teamId > state.playerCount) next[i].teamId = state.playerCount;
+    if (next[i].isHuman) {
+      delete next[i].aiDifficulty;
+    } else if (!next[i].aiDifficulty) {
+      next[i].aiDifficulty = state.aiDifficulty as AiDifficulty;
+    }
   }
   state.players = next;
 }
@@ -157,7 +162,7 @@ export function mountMenu(
             <em class="field-hint">Как быстро деревья захватывают соседние клетки каждый ход (0 — не растут)</em>
           </label>
           <label class="field field-wide">
-            <span>Сложность ИИ</span>
+            <span>Сложность ИИ (по умолчанию)</span>
             <div class="seg">
               ${AI_DIFFICULTY_PRESETS.map(
                 (d) => `
@@ -166,7 +171,7 @@ export function mountMenu(
                 </button>`,
               ).join('')}
             </div>
-            <em class="field-hint">${diffHint}</em>
+            <em class="field-hint">${diffHint}. Меняет сложность всех ИИ-государств; у каждого можно задать свою ниже.</em>
           </label>
         </div>
 
@@ -188,7 +193,19 @@ export function mountMenu(
                   }).join('')}
                 </select>
               </label>
-              <span class="nation-role">${p.isHuman ? 'Игрок' : 'ИИ'}</span>
+              ${
+                p.isHuman
+                  ? `<span class="nation-role">Игрок</span>`
+                  : `<label class="nation-ai-diff">
+                <span>Сложность</span>
+                <select data-ai-diff="${i}" aria-label="Сложность ИИ ${i + 1}">
+                  ${AI_DIFFICULTY_PRESETS.map((d) => {
+                    const cur = (p.aiDifficulty ?? state.aiDifficulty) as AiDifficultyId;
+                    return `<option value="${d.id}" ${cur === d.id ? 'selected' : ''}>${d.label}</option>`;
+                  }).join('')}
+                </select>
+              </label>`
+              }
             </div>`,
             )
             .join('')}
@@ -247,6 +264,9 @@ export function mountMenu(
     el.querySelectorAll<HTMLButtonElement>('[data-diff]').forEach((btn) => {
       btn.addEventListener('click', () => {
         state.aiDifficulty = btn.dataset.diff as AiDifficultyId;
+        for (const p of state.players) {
+          if (!p.isHuman) p.aiDifficulty = state.aiDifficulty as AiDifficulty;
+        }
         render();
       });
     });
@@ -275,6 +295,13 @@ export function mountMenu(
       sel.addEventListener('change', () => {
         const i = Number(sel.dataset.team);
         state.players[i].teamId = Number(sel.value) || i + 1;
+      });
+    });
+
+    el.querySelectorAll<HTMLSelectElement>('[data-ai-diff]').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const i = Number(sel.dataset.aiDiff);
+        state.players[i].aiDifficulty = sel.value as AiDifficulty;
       });
     });
 
